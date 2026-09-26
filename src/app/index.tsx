@@ -1,98 +1,114 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
+import { router } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { introStyles as styles } from '@/styles/intro.styles';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+const FIGMA_WIDTH = 412;
+const FIGMA_HEIGHT = 918;
 
 export default function HomeScreen() {
+  const { width, height } = useWindowDimensions();
+  const scale = Math.min(width / FIGMA_WIDTH, height / FIGMA_HEIGHT);
+  const frameWidth = FIGMA_WIDTH * scale;
+  const frameHeight = FIGMA_HEIGHT * scale;
+  const left = (width - frameWidth) / 2;
+  const top = (height - frameHeight) / 2;
+
+  const px = (value: number) => value * scale;
+  const x = (value: number) => left + px(value);
+  const y = (value: number) => top + px(value);
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+    <View style={styles.container}>
+      <StatusBar style="light" />
+      <Image
+        contentFit="cover"
+        source={require('@/assets/images/splash-background.png')}
+        style={StyleSheet.absoluteFill}
+      />
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+      <Image
+        contentFit="contain"
+        source={require('@/assets/images/photosync-logo.png')}
+        style={[
+          styles.logo,
+          {
+            left: x(78),
+            top: y(175),
+            width: px(255),
+            height: px(213),
+          },
+        ]}
+      />
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+      <Text
+        style={[
+          styles.wordmark,
+          {
+            left: x(83),
+            top: y(379),
+            width: px(269),
+            fontSize: px(96),
+            lineHeight: px(72),
+          },
+        ]}>
+        Photo<Text style={styles.wordmarkAccent}>Sync</Text>
+      </Text>
 
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+      <View
+        style={[
+          styles.tagline,
+          {
+            left: x(33),
+            top: y(459),
+            width: px(356),
+            height: px(57),
+          },
+        ]}>
+        <Text style={[styles.taglineText, { fontSize: px(36), lineHeight: px(57) }]}>Capture</Text>
+        <View style={[styles.dot, { width: px(4), height: px(4), borderRadius: px(2) }]} />
+        <Text style={[styles.taglineText, { fontSize: px(36), lineHeight: px(57) }]}>Book</Text>
+        <View style={[styles.dot, { width: px(4), height: px(4), borderRadius: px(2) }]} />
+        <Text style={[styles.taglineText, { fontSize: px(36), lineHeight: px(57) }]}>Relive</Text>
+      </View>
+
+      <View style={[styles.authActions, { left: x(42), top: y(719), width: px(337), gap: px(14) }]}>
+        <Pressable
+          accessibilityLabel="Login"
+          accessibilityRole="button"
+          onPress={() => router.push('/login')}
+          style={({ pressed }) => [
+            styles.authButton,
+            {
+              height: px(64),
+              borderRadius: px(15),
+              opacity: pressed ? 0.82 : 1,
+            },
+          ]}>
+          <Text style={[styles.authButtonText, { fontSize: px(22), lineHeight: px(29) }]}>
+            Login
+          </Text>
+        </Pressable>
+
+        <Pressable
+          accessibilityLabel="Create account"
+          accessibilityRole="button"
+          onPress={() => router.push('/create-account')}
+          style={({ pressed }) => [
+            styles.authButton,
+            {
+              height: px(64),
+              borderRadius: px(15),
+              opacity: pressed ? 0.82 : 1,
+            },
+          ]}>
+          <Text style={[styles.authButtonText, { fontSize: px(22), lineHeight: px(29) }]}>
+            Create Account
+          </Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
-  },
-});
