@@ -29,6 +29,8 @@ type PackageRow = {
 
 const packageCatalogCache = new Map<ServiceSlug, PackageCatalogItem[]>();
 const serviceCatalogBySlugCache = new Map<ServiceSlug, ServiceCatalogItem>();
+let adminPackageCatalogCache: PackageCatalogItem[] | null = null;
+let adminServicesCatalogCache: ServiceCatalogItem[] | null = null;
 let servicesCatalogCache: ServiceCatalogItem[] | null = null;
 
 export type ServiceFormValues = {
@@ -57,6 +59,14 @@ export type PackageFormValues = {
 
 export function getCachedServicesCatalog() {
   return servicesCatalogCache;
+}
+
+export function getCachedAdminServicesCatalog() {
+  return adminServicesCatalogCache;
+}
+
+export function getCachedAdminPackagesCatalog() {
+  return adminPackageCatalogCache;
 }
 
 export function getCachedServiceCatalogBySlug(slug: ServiceSlug) {
@@ -149,7 +159,11 @@ export async function getAdminServicesCatalog(): Promise<ServiceCatalogItem[]> {
     .in('service_id', serviceIds)
     .eq('is_active', true);
 
-  return data.map((row, index) => mapServiceRow(row as ServiceRow, index, packages ?? []));
+  const items = data.map((row, index) => mapServiceRow(row as ServiceRow, index, packages ?? []));
+
+  adminServicesCatalogCache = items;
+
+  return items;
 }
 
 export async function getPackagesForService(slug: ServiceSlug): Promise<PackageCatalogItem[]> {
@@ -209,7 +223,11 @@ export async function getAdminPackagesCatalog(): Promise<PackageCatalogItem[]> {
     return fallbackPortraitPackages;
   }
 
-  return data.map((row, index) => mapPackageRow(row as PackageRow, index));
+  const items = data.map((row, index) => mapPackageRow(row as PackageRow, index));
+
+  adminPackageCatalogCache = items;
+
+  return items;
 }
 
 export async function saveServiceCategory(values: ServiceFormValues) {
@@ -250,6 +268,8 @@ export async function saveServiceCategory(values: ServiceFormValues) {
     });
   }
 
+  adminServicesCatalogCache = null;
+
   await createAuditLog({
     action: values.id ? 'service.updated' : 'service.created',
     entityId: values.id ?? data?.id,
@@ -288,6 +308,7 @@ export async function saveServicePackage(values: PackageFormValues) {
   }
 
   invalidatePackageCache(values.serviceId);
+  adminPackageCatalogCache = null;
 
   await createAuditLog({
     action: values.id ? 'package.updated' : 'package.created',
@@ -393,6 +414,11 @@ export async function setServiceActive(id: string, isActive: boolean) {
     metadata: { isActive },
   });
 
+  adminServicesCatalogCache = adminServicesCatalogCache?.map((item) => (item.id === id ? { ...item, isActive } : item)) ?? null;
+  servicesCatalogCache = isActive
+    ? servicesCatalogCache
+    : servicesCatalogCache?.filter((item) => item.id !== id) ?? null;
+
   return { success: true };
 }
 
@@ -413,6 +439,8 @@ export async function setPackageActive(id: string, isActive: boolean) {
     entityType: 'package',
     metadata: { isActive },
   });
+
+  adminPackageCatalogCache = adminPackageCatalogCache?.map((item) => (item.id === id ? { ...item, isActive } : item)) ?? null;
 
   return { success: true };
 }

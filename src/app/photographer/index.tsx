@@ -1,36 +1,72 @@
 import { router, useFocusEffect } from 'expo-router';
+import { Image } from 'expo-image';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import Svg, { Path, Rect } from 'react-native-svg';
 
 import { formatBookingTimeRange, getAdminBookingRequests } from '@/services/admin-bookings';
-import { getClosedDayCount, getMonthPrefix } from '@/services/calendar';
-import { getMyNotifications, markAllNotificationsRead, markNotificationRead } from '@/services/notifications';
+import { subscribeToBookingsChanged } from '@/services/booking-events';
+import { getMyNotifications } from '@/services/notifications';
 import { bottomNavMetrics } from '@/styles/navigation.styles';
 import { photographerStyles as styles } from '@/styles/photographer.styles';
 import { type AdminBookingRequest } from '@/types/admin-bookings';
 import { type PhotoSyncNotification } from '@/types/notifications';
 
-type StatIconName = 'bell' | 'calendar' | 'closed' | 'request' | 'today';
+type StatIconName = 'bell' | 'calendar' | 'request' | 'today';
 type AppointmentItem = {
   bookingId: string;
   client: string;
+  image: number;
+  isSample?: boolean;
   service: string;
   status: 'Ongoing' | 'Upcoming';
   time: string;
 };
 
+const APPOINTMENT_IMAGES = [
+  require('@/assets/images/admin-appointment-1.png'),
+  require('@/assets/images/admin-appointment-2.png'),
+  require('@/assets/images/admin-appointment-3.png'),
+];
+
+const SAMPLE_ADMIN_APPOINTMENTS: AppointmentItem[] = [
+  {
+    bookingId: 'sample-admin-1',
+    client: 'Avery Santos',
+    image: APPOINTMENT_IMAGES[0],
+    isSample: true,
+    service: 'Solo Portrait',
+    status: 'Ongoing',
+    time: '8:00 AM - 10:30 AM',
+  },
+  {
+    bookingId: 'sample-admin-2',
+    client: 'Mika Reyes',
+    image: APPOINTMENT_IMAGES[1],
+    isSample: true,
+    service: 'Pre-Wedding',
+    status: 'Upcoming',
+    time: '1:00 PM - 3:00 PM',
+  },
+  {
+    bookingId: 'sample-admin-3',
+    client: 'Jalen Cruz',
+    image: APPOINTMENT_IMAGES[2],
+    isSample: true,
+    service: 'Group Session',
+    status: 'Upcoming',
+    time: '4:00 PM - 5:30 PM',
+  },
+];
+
 export default function PhotographerDashboardScreen() {
   const insets = useSafeAreaInsets();
   const [bookings, setBookings] = useState<AdminBookingRequest[]>([]);
-  const [closedDays, setClosedDays] = useState(0);
   const [notifications, setNotifications] = useState<PhotoSyncNotification[]>([]);
-  const [showNotifications, setShowNotifications] = useState(false);
   const bottomPadding = bottomNavMetrics.height + insets.bottom + 24;
   const todayDate = getTodayDate();
-  const currentMonth = getMonthPrefix(todayDate);
   const pendingRequests = useMemo(
     () => bookings.filter((booking) => booking.status === 'pending'),
     [bookings],
@@ -49,147 +85,148 @@ export default function PhotographerDashboardScreen() {
         .sort((a, b) => `${a.bookingDate}-${a.startTime}`.localeCompare(`${b.bookingDate}-${b.startTime}`)),
     [bookings, todayDate],
   );
-  const appointmentCards: AppointmentItem[] = todayAppointments.slice(0, 3).map((booking) => ({
+  const appointmentCards: AppointmentItem[] = todayAppointments.slice(0, 3).map((booking, index) => ({
     bookingId: booking.id,
     client: booking.clientName,
+    image: APPOINTMENT_IMAGES[index % APPOINTMENT_IMAGES.length],
     service: booking.packageName,
     status: isOngoingAppointment(booking) ? 'Ongoing' : 'Upcoming',
     time: formatBookingTimeRange(booking.startTime, booking.endTime),
   }));
   const unreadNotifications = notifications.filter((notification) => !notification.isRead);
-  const notificationItems = notifications.slice(0, 4);
-  const stats: { icon: StatIconName; label: string; value: string }[] = [
-    { icon: 'request', label: 'Pending Requests', value: String(pendingRequests.length) },
-    { icon: 'today', label: "Today's Confirmed", value: String(todayAppointments.length) },
-    { icon: 'calendar', label: 'Upcoming Confirmed', value: String(upcomingAppointments.length) },
-    { icon: 'closed', label: 'Closed Days', value: String(closedDays) },
-    { icon: 'bell', label: 'Unread Alerts', value: String(unreadNotifications.length) },
+  const displayAppointments = appointmentCards.length > 0 ? appointmentCards : SAMPLE_ADMIN_APPOINTMENTS;
+  const stats: { icon: StatIconName; label: string; labelLines: string[]; tone: 'blue' | 'orange' | 'red'; value: string }[] = [
+    { icon: 'request', label: 'Pending Requests', labelLines: ['Pending', 'Requests'], tone: 'orange', value: String(pendingRequests.length) },
+    { icon: 'today', label: "Today's Appointments", labelLines: ["Today's", 'Appointments'], tone: 'blue', value: String(todayAppointments.length) },
+    { icon: 'calendar', label: 'Upcoming Appointments', labelLines: ['Upcoming', 'Appointments'], tone: 'blue', value: String(upcomingAppointments.length) },
+    { icon: 'bell', label: 'New Notification', labelLines: ['New', 'Notification'], tone: 'red', value: String(unreadNotifications.length) },
   ];
+  const loadDashboardData = useCallback(async (isMounted: () => boolean = () => true) => {
+    const [bookingItems, notificationRows] = await Promise.all([
+      getAdminBookingRequests(),
+      getMyNotifications(),
+    ]);
+
+    if (isMounted()) {
+      setBookings(bookingItems);
+      setNotifications(notificationRows);
+    }
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
-    let isMounted = true;
+      let isMounted = true;
 
-    Promise.all([getAdminBookingRequests(), getMyNotifications(), getClosedDayCount(currentMonth)]).then(([bookingItems, notificationRows, closedDayTotal]) => {
-      if (isMounted) {
-        setBookings(bookingItems);
-        setNotifications(notificationRows);
-        setClosedDays(closedDayTotal);
-      }
-    });
+      void loadDashboardData(() => isMounted);
 
-    return () => {
-      isMounted = false;
-    };
-  }, [currentMonth]));
+      return () => {
+        isMounted = false;
+      };
+    }, [loadDashboardData]),
+  );
 
-  async function handleNotificationPress(notification: PhotoSyncNotification) {
-    if (!notification.isRead) {
-      const result = await markNotificationRead(notification.id);
-
-      if (result.success) {
-        setNotifications((items) =>
-          items.map((item) => (item.id === notification.id ? { ...item, isRead: true } : item)),
-        );
-      }
-    }
-
-    if (notification.bookingId) {
-      router.push(`/photographer/requests/${notification.bookingId}` as never);
-    }
-  }
-
-  async function handleMarkAllRead() {
-    const result = await markAllNotificationsRead();
-
-    if (result.success) {
-      setNotifications((items) => items.map((item) => ({ ...item, isRead: true })));
-    }
-  }
+  useEffect(
+    () =>
+      subscribeToBookingsChanged(() => {
+        void loadDashboardData();
+      }),
+    [loadDashboardData],
+  );
 
   return (
     <View style={styles.container}>
-      <StatusBar style="dark" />
+      <StatusBar style="light" />
+      <Image
+        contentFit="cover"
+        source={require('@/assets/images/admin-dashboard-background.png')}
+        style={styles.adminDashboardBackground}
+      />
       <ScrollView
         bounces={false}
-        contentContainerStyle={[styles.scrollContent, styles.adminHomeContent, { paddingBottom: bottomPadding }]}
+        contentContainerStyle={[
+          styles.adminDashboardContent,
+          { paddingBottom: bottomPadding },
+        ]}
         showsVerticalScrollIndicator={false}
         style={styles.scrollView}>
-        <View style={styles.adminTopBar}>
-          <Pressable accessibilityLabel="Open admin menu" accessibilityRole="button" style={styles.iconButton}>
-            <MenuIcon />
-          </Pressable>
-          <View style={styles.adminBrand}>
-            <Text style={styles.adminBrandText}>PhotoSync</Text>
-            <CameraLogo />
+        <View style={[styles.adminDashboardHeader, { paddingTop: insets.top }]}>
+          <Image
+            contentFit="cover"
+            source={require('@/assets/images/admin-header-texture.png')}
+            style={styles.adminHeaderTexture}
+          />
+          <View style={styles.adminDashboardBrand}>
+            <Text style={styles.adminDashboardBrandText}>PhotoSync</Text>
+            <Image
+              contentFit="contain"
+              source={require('@/assets/images/photosync-logo.png')}
+              style={styles.adminDashboardBrandLogo}
+            />
           </View>
-          <Pressable
-            accessibilityLabel="Show notifications"
-            accessibilityRole="button"
-            onPress={() => setShowNotifications((value) => !value)}
-            style={({ pressed }) => [styles.floatingBellButton, pressed && { opacity: 0.82 }]}>
-            <StatIcon name="bell" />
-            {unreadNotifications.length > 0 && <View style={styles.floatingBellDot} />}
-          </Pressable>
         </View>
 
-        {showNotifications && (
-          <View style={styles.notificationPopover}>
-            <View style={styles.notificationPopoverHeader}>
-              <Text style={styles.notificationPopoverTitle}>Notifications</Text>
-              <Pressable accessibilityRole="button" onPress={handleMarkAllRead}>
-                <Text style={styles.notificationPopoverMeta}>
-                  {unreadNotifications.length ? 'Mark all read' : 'All read'}
-                </Text>
-              </Pressable>
-            </View>
-            {notificationItems.length === 0 && (
-              <Text style={styles.requestDate}>No new booking notifications.</Text>
-            )}
-            {notificationItems.map((item) => (
-              <NotificationCard item={item} key={item.id} onPress={() => handleNotificationPress(item)} />
-            ))}
+        <View style={styles.adminDashboardHero}>
+          <Image
+            contentFit="contain"
+            source={require('@/assets/images/admin-dashboard-extra.png')}
+            style={styles.adminDashboardHeroImage}
+          />
+          <Text style={styles.adminDashboardGreeting}>Good morning,</Text>
+          <View style={styles.adminDashboardGreetingRow}>
+            <Text style={styles.adminDashboardGreetingAccent}>Admin!</Text>
+            <Pressable
+              accessibilityLabel="Open notifications"
+              accessibilityRole="button"
+              onPress={() => router.push('/photographer/notifications')}
+              style={({ pressed }) => [pressed && { opacity: 0.72 }]}>
+              <StatIcon name="bell" size={25} />
+            </Pressable>
           </View>
-        )}
-
-        <View style={styles.adminHero}>
-          <View style={styles.heroDecorationOne} />
-          <View style={styles.heroDecorationTwo} />
-          <Text style={styles.adminGreeting}>Good morning,{'\n'}Admin!</Text>
-          <Text style={styles.adminDate}>{formatDashboardDate(new Date())}</Text>
+          <Text style={styles.adminDashboardSubtitle}>See how your business is doing today.</Text>
         </View>
 
-        <View style={styles.adminStatsGrid}>
+        <View style={styles.adminDashboardStatsRow}>
           {stats.map((stat) => (
-            <View key={stat.label} style={styles.adminStatCard}>
-              <View style={styles.adminStatIconWrap}>
-                <StatIcon name={stat.icon} />
+            <Pressable
+              accessibilityRole={stat.icon === 'bell' ? 'button' : undefined}
+              disabled={stat.icon !== 'bell'}
+              key={stat.label}
+              onPress={() => router.push('/photographer/notifications')}
+              style={({ pressed }) => [styles.adminDashboardStatCard, pressed && { opacity: 0.82 }]}>
+              <View
+                style={[
+                  styles.adminDashboardStatIconWrap,
+                  stat.tone === 'orange' && styles.adminDashboardStatIconOrange,
+                  stat.tone === 'red' && styles.adminDashboardStatIconRed,
+                ]}>
+                <StatIcon name={stat.icon} size={22} />
               </View>
-              <Text style={styles.adminStatValue}>{stat.value}</Text>
-              <Text style={styles.adminStatLabel}>{stat.label}</Text>
-            </View>
+              <Text style={styles.adminDashboardStatValue}>{stat.value}</Text>
+              <Text style={styles.adminDashboardStatLabel}>{stat.labelLines.join('\n')}</Text>
+            </Pressable>
           ))}
         </View>
 
-        <View style={styles.adminSectionHeader}>
-          <Text style={styles.adminSectionTitle}>Today&apos;s Appointments</Text>
+        <View style={styles.adminDashboardSectionHeader}>
+          <Text style={styles.adminDashboardSectionTitle}>Today&apos;s Appointments</Text>
+          <View style={styles.adminDashboardHeaderActions}>
+            <View style={styles.adminDashboardUpcomingPill}>
+              <Text style={styles.adminDashboardUpcomingText}>Upcoming</Text>
+            </View>
           <Pressable
             accessibilityRole="button"
             onPress={() => router.push('/photographer/requests')}
-            style={({ pressed }) => [styles.viewAllButton, pressed && { opacity: 0.7 }]}>
-            <Text style={styles.viewAllText}>View All</Text>
+              style={({ pressed }) => [styles.adminDashboardViewAllButton, pressed && { opacity: 0.7 }]}>
+              <Text style={styles.adminDashboardViewAllText}>View All</Text>
           </Pressable>
+          </View>
         </View>
 
-        <View style={styles.adminListPanel}>
-          {appointmentCards.length === 0 && (
-            <Text style={styles.requestDate}>No confirmed appointments today.</Text>
-          )}
-          {appointmentCards.map((item) => (
+        <View style={styles.adminDashboardAppointmentList}>
+          {displayAppointments.map((item) => (
             <AppointmentCard item={item} key={item.bookingId} />
           ))}
         </View>
-
       </ScrollView>
     </View>
   );
@@ -205,18 +242,20 @@ function AppointmentCard({
   return (
     <Pressable
       accessibilityRole="button"
-      onPress={() => router.push(`/photographer/requests/${item.bookingId}` as never)}
-      style={({ pressed }) => [styles.adminAppointmentCard, pressed && { opacity: 0.86 }]}>
-      <View style={styles.appointmentThumb}>
-        <CameraLogo compact />
+      onPress={() => {
+        if (!item.isSample) {
+          router.push(`/photographer/requests/${item.bookingId}` as never);
+        }
+      }}
+      style={({ pressed }) => [styles.adminDashboardAppointmentCard, pressed && !item.isSample && { opacity: 0.86 }]}>
+      <Image contentFit="cover" source={item.image} style={styles.adminDashboardAppointmentImage} />
+      <View style={styles.adminDashboardAppointmentCopy}>
+        <Text style={styles.adminDashboardAppointmentTime}>{item.time}</Text>
+        <Text style={styles.adminDashboardAppointmentService}>{item.service}</Text>
+        <Text style={styles.adminDashboardAppointmentClient}>{item.client}</Text>
       </View>
-      <View style={styles.appointmentCopy}>
-        <Text style={styles.appointmentTime}>{item.time}</Text>
-        <Text style={styles.appointmentService}>{item.service}</Text>
-        <Text style={styles.appointmentClient}>{item.client}</Text>
-      </View>
-      <View style={[styles.appointmentBadge, isOngoing ? styles.ongoingBadge : styles.upcomingBadge]}>
-        <Text style={[styles.appointmentBadgeText, isOngoing ? styles.ongoingText : styles.upcomingText]}>
+      <View style={[styles.adminDashboardAppointmentBadge, isOngoing ? styles.ongoingBadge : styles.upcomingBadge]}>
+        <Text style={[styles.adminDashboardAppointmentBadgeText, isOngoing ? styles.ongoingText : styles.upcomingText]}>
           {item.status}
         </Text>
       </View>
@@ -225,66 +264,19 @@ function AppointmentCard({
   );
 }
 
-function NotificationCard({ item, onPress }: { item: PhotoSyncNotification; onPress: () => void }) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.adminNotificationCard,
-        item.isRead && styles.readNotificationCard,
-        pressed && { opacity: 0.86 },
-      ]}>
-      <View style={styles.notificationIconWrap}>
-        <StatIcon name="bell" />
-      </View>
-      <View style={styles.notificationCopy}>
-        <Text style={styles.notificationTitle}>{item.title}</Text>
-        <Text style={styles.notificationMeta}>{item.message}</Text>
-      </View>
-      {!item.isRead && <View style={styles.notificationUnreadDot} />}
-    </Pressable>
-  );
-}
-
-function MenuIcon() {
-  return (
-    <Svg width={28} height={28} viewBox="0 0 28 28" fill="none">
-      <Path d="M6 9H22M6 14H18M6 19H22" stroke="#142C4C" strokeWidth={2.5} strokeLinecap="round" />
-    </Svg>
-  );
-}
-
-function CameraLogo({ compact = false }: { compact?: boolean }) {
-  const size = compact ? 26 : 32;
-
-  return (
-    <Svg width={size} height={size * 0.8} viewBox="0 0 32 26" fill="none">
-      <Path
-        d="M28.4 6.2H23.6L22.3 3.2C22 2.5 21.4 2 20.6 2H11.4C10.6 2 10 2.5 9.7 3.2L8.4 6.2H3.6C2.2 6.2 1 7.4 1 8.8V22.4C1 23.8 2.2 25 3.6 25H28.4C29.8 25 31 23.8 31 22.4V8.8C31 7.4 29.8 6.2 28.4 6.2Z"
-        stroke="#142C4C"
-        strokeLinejoin="round"
-        strokeWidth={2.4}
-      />
-      <Circle cx={16} cy={15.5} r={5.9} stroke="#142C4C" strokeWidth={2.4} />
-      <Circle cx={26.2} cy={10.1} r={1.3} fill="#142C4C" />
-    </Svg>
-  );
-}
-
-function StatIcon({ name }: { name: StatIconName }) {
+function StatIcon({ name, size = 24 }: { name: StatIconName; size?: number }) {
   if (name === 'bell') {
     return (
-      <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-        <Path d="M18 16V11C18 7.7 16 5.2 13 4.4V3.8C13 3.1 12.5 2.6 11.8 2.6C11.1 2.6 10.6 3.1 10.6 3.8V4.4C7.7 5.1 5.8 7.7 5.8 11V16L4.4 18H19.4L18 16Z" fill="#F05D5D" />
-        <Path d="M9.8 19.4C10.2 20.3 11 20.8 12 20.8C13 20.8 13.8 20.3 14.2 19.4" stroke="#F05D5D" strokeLinecap="round" strokeWidth={1.8} />
+      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path d="M18 16V11C18 7.7 16 5.2 13 4.4V3.8C13 3.1 12.5 2.6 11.8 2.6C11.1 2.6 10.6 3.1 10.6 3.8V4.4C7.7 5.1 5.8 7.7 5.8 11V16L4.4 18H19.4L18 16Z" fill="#4C77A5" />
+        <Path d="M9.8 19.4C10.2 20.3 11 20.8 12 20.8C13 20.8 13.8 20.3 14.2 19.4" stroke="#4C77A5" strokeLinecap="round" strokeWidth={1.8} />
       </Svg>
     );
   }
 
   if (name === 'request') {
     return (
-      <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
         <Rect x={5} y={4} width={14} height={16} rx={2} stroke="#FF9E44" strokeWidth={2} />
         <Path d="M8 9H16M8 13H14M8 17H12" stroke="#FF9E44" strokeLinecap="round" strokeWidth={2} />
       </Svg>
@@ -293,7 +285,7 @@ function StatIcon({ name }: { name: StatIconName }) {
 
   if (name === 'today') {
     return (
-      <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
         <Rect x={4} y={5} width={16} height={15} rx={2} stroke="#4C8DEB" strokeWidth={2} />
         <Path d="M8 3.5V7M16 3.5V7M4 10H20" stroke="#4C8DEB" strokeLinecap="round" strokeWidth={2} />
         <Path d="M9 15L11 17L15.5 12.5" stroke="#4C8DEB" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
@@ -301,33 +293,12 @@ function StatIcon({ name }: { name: StatIconName }) {
     );
   }
 
-  if (name === 'closed') {
-    return (
-      <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-        <Rect x={4} y={5} width={16} height={15} rx={2} stroke="#E45F62" strokeWidth={2} />
-        <Path d="M8 3.5V7M16 3.5V7M4 10H20" stroke="#E45F62" strokeLinecap="round" strokeWidth={2} />
-        <Path d="M9 14L15 18M15 14L9 18" stroke="#E45F62" strokeLinecap="round" strokeWidth={2} />
-      </Svg>
-    );
-  }
-
   return (
-    <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Rect x={4} y={5} width={16} height={15} rx={2} stroke="#4C8DEB" strokeWidth={2} />
       <Path d="M8 3.5V7M16 3.5V7M4 10H20M8 14H10M12 14H14M16 14H18M8 17H10M12 17H14" stroke="#4C8DEB" strokeLinecap="round" strokeWidth={2} />
     </Svg>
   );
-}
-
-function formatDashboardDate(date: Date) {
-  const formattedDate = new Intl.DateTimeFormat('en-US', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  }).format(date);
-  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(date);
-
-  return `${formattedDate}   ${weekday}`;
 }
 
 function getTodayDate() {

@@ -3,6 +3,7 @@ import { useSyncExternalStore } from 'react';
 export type ClientTabRoute = '/home' | '/services' | '/book' | '/about' | '/profile';
 export type PhotographerTabRoute =
   | '/photographer'
+  | '/photographer/calendar-slots'
   | '/photographer/requests'
   | '/photographer/calendar'
   | '/photographer/services'
@@ -55,6 +56,10 @@ const listeners = new Set<() => void>();
 
 export function getTabRouteIndex(pathname: string) {
   const tabItems = getTabItems(pathname);
+  if (pathname === '/photographer/calendar-slots') {
+    return tabItems.findIndex((item) => item.route === '/photographer/calendar');
+  }
+
   const exactIndex = tabItems.findIndex((item) => pathname === item.route);
 
   if (exactIndex >= 0) {
@@ -69,7 +74,7 @@ export function isPathInTabSection(pathname: string) {
 }
 
 export function isBottomNavVisible(pathname: string) {
-  return getTabItems(pathname).some((item) => pathname === item.route);
+  return getTabItems(pathname).some((item) => pathname === item.route) || pathname === '/photographer/calendar-slots';
 }
 
 export function getTabItems(pathname: string) {

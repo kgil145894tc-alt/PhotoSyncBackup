@@ -18,6 +18,8 @@ export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     Inter: require('@/assets/fonts/Inter/static/Inter_18pt-Regular.ttf'),
     InterBold: require('@/assets/fonts/Inter/static/Inter_18pt-Bold.ttf'),
+    InterMedium: require('@/assets/fonts/Inter/static/Inter_18pt-Medium.ttf'),
+    InterSemiBold: require('@/assets/fonts/Inter/static/Inter_18pt-SemiBold.ttf'),
     Italianno: require('@/assets/fonts/Italianno/Italianno-Regular.ttf'),
     Jomolhari: require('@/assets/fonts/jomolhari-3/Jomolhari-Regular.ttf'),
     Jomhuria: require('@/assets/fonts/jomhuria/Jomhuria-Regular.ttf'),

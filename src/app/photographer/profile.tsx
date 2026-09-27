@@ -1,24 +1,36 @@
-import { router } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Circle, Path } from 'react-native-svg';
+import { Image } from "expo-image";
+import { router } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { useEffect, useState } from "react";
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Circle, Path } from "react-native-svg";
 
-import { signOutPhotoSync } from '@/services/auth';
-import { getStudioSettings, saveStudioSettings, type StudioSettings } from '@/services/studio-settings';
-import { bottomNavMetrics } from '@/styles/navigation.styles';
-import { photographerStyles as styles } from '@/styles/photographer.styles';
+import { signOutPhotoSync } from "@/services/auth";
+import {
+  getStudioSettings,
+  saveStudioSettings,
+  type StudioSettings,
+} from "@/services/studio-settings";
+import { bottomNavMetrics } from "@/styles/navigation.styles";
+import { photographerStyles as styles } from "@/styles/photographer.styles";
 
 export default function PhotographerProfileScreen() {
   const insets = useSafeAreaInsets();
-  const [businessHours, setBusinessHours] = useState('');
-  const [contactEmail, setContactEmail] = useState('');
-  const [contactPhone, setContactPhone] = useState('');
-  const [defaultShootLocation, setDefaultShootLocation] = useState('');
+  const [businessHours, setBusinessHours] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+  const [defaultShootLocation, setDefaultShootLocation] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const [studioAddress, setStudioAddress] = useState('');
-  const [studioName, setStudioName] = useState('PhotoSync Studio');
+  const [studioAddress, setStudioAddress] = useState("");
+  const [studioName, setStudioName] = useState("PhotoSync Studio");
   const bottomPadding = bottomNavMetrics.height + insets.bottom + 24;
 
   useEffect(() => {
@@ -46,7 +58,7 @@ export default function PhotographerProfileScreen() {
     }
 
     if (!studioName.trim()) {
-      Alert.alert('Missing studio name', 'Please enter your studio name.');
+      Alert.alert("Missing studio name", "Please enter your studio name.");
       return;
     }
 
@@ -64,47 +76,102 @@ export default function PhotographerProfileScreen() {
     setIsSaving(false);
 
     if (!result.success) {
-      Alert.alert('Studio settings not saved', result.message ?? 'Please try again.');
+      Alert.alert(
+        "Studio settings not saved",
+        result.message ?? "Please try again.",
+      );
       return;
     }
 
-    Alert.alert('Studio settings saved', 'Your studio information has been updated.');
+    Alert.alert(
+      "Studio settings saved",
+      "Your studio information has been updated.",
+    );
   }
 
   return (
     <View style={styles.container}>
+      <Image
+        contentFit="cover"
+        source={require("@/assets/images/admin-calendar-background.png")}
+        style={styles.servicesFigmaBackground}
+      />
       <StatusBar style="dark" />
       <ScrollView
         bounces={false}
-        contentContainerStyle={[styles.adminProfileContent, { paddingBottom: bottomPadding }]}
+        contentContainerStyle={[
+          styles.adminProfileContent,
+          { paddingBottom: bottomPadding },
+        ]}
         keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}>
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.simpleProfileHeader}>
           <View style={styles.simpleProfileLogo}>
-            <CameraLogo />
+            <Image
+              contentFit="contain"
+              source={require("@/assets/images/admin-calendar-logo.png")}
+              style={styles.servicesCategoryBrandLogo}
+            />
           </View>
-          <Text style={styles.simpleProfileName}>{studioName || 'Admin'}</Text>
+          <Text style={styles.simpleProfileName}>{studioName || "Admin"}</Text>
           <Text style={styles.simpleProfileRole}>Studio Administrator</Text>
         </View>
 
         <View style={styles.studioSettingsCard}>
           <Text style={styles.studioSettingsTitle}>Studio Information</Text>
-          <Text style={styles.studioSettingsSubtitle}>These details can be reused for booking confirmations, contact details, and client location choices.</Text>
+          <Text style={styles.studioSettingsSubtitle}></Text>
 
-          <StudioInput label="Studio Name" onChangeText={setStudioName} value={studioName} />
-          <StudioInput label="Studio Address" multiline onChangeText={setStudioAddress} value={studioAddress} />
-          <StudioInput keyboardType="phone-pad" label="Contact Number" onChangeText={setContactPhone} value={contactPhone} />
-          <StudioInput keyboardType="email-address" label="Contact Email" onChangeText={setContactEmail} value={contactEmail} />
-          <StudioInput label="Default Shoot Location" onChangeText={setDefaultShootLocation} placeholder="Example: PhotoSync Studio" value={defaultShootLocation} />
-          <StudioInput label="Business Hours" multiline onChangeText={setBusinessHours} placeholder="Example: Mon-Sat, 8:00 AM - 5:00 PM" value={businessHours} />
+          <StudioInput
+            label="Studio Name"
+            onChangeText={setStudioName}
+            value={studioName}
+          />
+          <StudioInput
+            label="Studio Address"
+            multiline
+            onChangeText={setStudioAddress}
+            value={studioAddress}
+          />
+          <StudioInput
+            keyboardType="phone-pad"
+            label="Contact Number"
+            onChangeText={setContactPhone}
+            value={contactPhone}
+          />
+          <StudioInput
+            keyboardType="email-address"
+            label="Contact Email"
+            onChangeText={setContactEmail}
+            value={contactEmail}
+          />
+          <StudioInput
+            label="Default Shoot Location"
+            onChangeText={setDefaultShootLocation}
+            placeholder="Example: PhotoSync Studio"
+            value={defaultShootLocation}
+          />
+          <StudioInput
+            label="Business Hours"
+            multiline
+            onChangeText={setBusinessHours}
+            placeholder="Example: Mon-Sat, 8:00 AM - 5:00 PM"
+            value={businessHours}
+          />
 
           <Pressable
             accessibilityLabel="Save studio settings"
             accessibilityRole="button"
             disabled={isSaving}
             onPress={handleSave}
-            style={({ pressed }) => [styles.studioSaveButton, (pressed || isSaving) && { opacity: 0.78 }]}>
-            <Text style={styles.studioSaveText}>{isSaving ? 'Saving...' : 'Save Studio Info'}</Text>
+            style={({ pressed }) => [
+              styles.studioSaveButton,
+              (pressed || isSaving) && { opacity: 0.78 },
+            ]}
+          >
+            <Text style={styles.studioSaveText}>
+              {isSaving ? "Saving..." : "Save Studio Info"}
+            </Text>
           </Pressable>
         </View>
 
@@ -113,9 +180,13 @@ export default function PhotographerProfileScreen() {
           accessibilityRole="button"
           onPress={async () => {
             await signOutPhotoSync();
-            router.replace('/');
+            router.replace("/");
           }}
-          style={({ pressed }) => [styles.simpleLogoutButton, pressed && { opacity: 0.82 }]}>
+          style={({ pressed }) => [
+            styles.simpleLogoutButton,
+            pressed && { opacity: 0.82 },
+          ]}
+        >
           <LogoutIcon />
           <Text style={styles.simpleLogoutText}>Log Out</Text>
         </Pressable>
@@ -132,7 +203,7 @@ function StudioInput({
   placeholder,
   value,
 }: {
-  keyboardType?: 'default' | 'email-address' | 'phone-pad';
+  keyboardType?: "default" | "email-address" | "phone-pad";
   label: string;
   multiline?: boolean;
   onChangeText: (value: string) => void;
@@ -143,7 +214,7 @@ function StudioInput({
     <View style={styles.studioField}>
       <Text style={styles.formLabel}>{label}</Text>
       <TextInput
-        autoCapitalize={keyboardType === 'email-address' ? 'none' : 'sentences'}
+        autoCapitalize={keyboardType === "email-address" ? "none" : "sentences"}
         keyboardType={keyboardType}
         multiline={multiline}
         onChangeText={onChangeText}
@@ -174,8 +245,20 @@ function CameraLogo() {
 function LogoutIcon() {
   return (
     <Svg width={23} height={23} viewBox="0 0 24 24" fill="none">
-      <Path d="M10 5H6C5.4 5 5 5.4 5 6V18C5 18.6 5.4 19 6 19H10" stroke="#E45F62" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} />
-      <Path d="M14 8L18 12L14 16M18 12H10" stroke="#E45F62" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} />
+      <Path
+        d="M10 5H6C5.4 5 5 5.4 5 6V18C5 18.6 5.4 19 6 19H10"
+        stroke="#E45F62"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2.2}
+      />
+      <Path
+        d="M14 8L18 12L14 16M18 12H10"
+        stroke="#E45F62"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2.2}
+      />
     </Svg>
   );
 }

@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { emitBookingsChanged } from '@/services/booking-events';
 import { createBookingStatusHistory } from '@/services/booking-status-history';
 import { getBookingDraft } from '@/services/booking-draft';
 import { createAdminBookingSubmittedNotifications } from '@/services/notifications';
@@ -160,6 +161,8 @@ export async function submitBookingRequest(): Promise<SubmitBookingResult> {
       clientName: information.fullName.trim(),
       packageName: selectedPackage.name,
     });
+
+    emitBookingsChanged();
   }
 
   return { success: true };

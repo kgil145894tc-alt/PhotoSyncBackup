@@ -79,6 +79,20 @@ export async function updateMyProfile(values: ProfileFormValues) {
   return { success: true };
 }
 
+export async function updateMyPassword(password: string) {
+  if (!supabase) {
+    return { message: 'Supabase is not connected yet.', success: false };
+  }
+
+  const { error } = await supabase.auth.updateUser({ password });
+
+  if (error) {
+    return { message: error.message, success: false };
+  }
+
+  return { success: true };
+}
+
 export async function uploadProfileAvatar({
   fileName,
   mimeType,

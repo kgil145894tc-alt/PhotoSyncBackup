@@ -40,7 +40,6 @@ export default function HomePageScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [notifications, setNotifications] = useState<PhotoSyncNotification[]>([]);
-  const [showNotifications, setShowNotifications] = useState(false);
   const navTop = height - bottomNavMetrics.height - insets.bottom;
   const scale = Math.min(width / FIGMA_WIDTH, height / FIGMA_HEIGHT, navTop / FIGMA_NAV_TOP);
   const frameWidth = FIGMA_WIDTH * scale;
@@ -90,9 +89,9 @@ export default function HomePageScreen() {
       </Text>
 
       <Pressable
-        accessibilityLabel="Show notifications"
+        accessibilityLabel="Open notifications"
         accessibilityRole="button"
-        onPress={() => setShowNotifications((value) => !value)}
+        onPress={() => router.push('/notifications' as never)}
         style={({ pressed }) => [
           styles.notificationButton,
           {
@@ -104,57 +103,11 @@ export default function HomePageScreen() {
             opacity: pressed ? 0.82 : 1,
           },
         ]}>
-        <BellIcon size={px(23)} />
+        <BellIcon color="#4C77A5" size={px(31)} />
         {unreadNotifications.length > 0 && (
           <View style={[styles.notificationDot, { width: px(9), height: px(9), borderRadius: px(5) }]} />
         )}
       </Pressable>
-
-      {showNotifications && (
-        <View
-          style={[
-            styles.notificationPopover,
-            {
-              left: x(92),
-              top: y(84),
-              width: px(296),
-              borderRadius: px(14),
-            },
-          ]}>
-          <View style={styles.notificationHeader}>
-            <Text style={[styles.notificationTitle, { fontSize: px(15), lineHeight: px(20) }]}>Notifications</Text>
-            <Text style={[styles.notificationMeta, { fontSize: px(11), lineHeight: px(15) }]}>
-              {unreadNotifications.length} new
-            </Text>
-          </View>
-          {notifications.length === 0 ? (
-            <Text style={[styles.notificationEmpty, { fontSize: px(12), lineHeight: px(17) }]}>
-              No booking notifications yet.
-            </Text>
-          ) : (
-            notifications.slice(0, 3).map((notification) => (
-              <Pressable
-                accessibilityRole="button"
-                key={notification.id}
-                onPress={() => router.push('/notifications' as never)}
-                style={({ pressed }) => [styles.notificationCard, pressed && { opacity: 0.86 }]}>
-                <View style={styles.notificationCardIcon}>
-                  <BellIcon color="#ED2314" size={px(17)} />
-                </View>
-                <View style={styles.notificationCardCopy}>
-                  <Text style={[styles.notificationCardTitle, { fontSize: px(12), lineHeight: px(16) }]} numberOfLines={1}>
-                    {notification.title}
-                  </Text>
-                  <Text style={[styles.notificationCardMessage, { fontSize: px(11), lineHeight: px(15) }]} numberOfLines={2}>
-                    {notification.message}
-                  </Text>
-                </View>
-                {!notification.isRead && <View style={styles.notificationUnreadDot} />}
-              </Pressable>
-            ))
-          )}
-        </View>
-      )}
 
       <Image
         contentFit="contain"

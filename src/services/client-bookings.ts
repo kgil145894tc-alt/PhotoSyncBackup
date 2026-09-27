@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { fallbackPortraitPackages } from '@/data/service-catalog';
 import { expirePastPendingBookings } from '@/services/booking-expiration';
+import { emitBookingsChanged } from '@/services/booking-events';
 import { createBookingStatusHistory } from '@/services/booking-status-history';
 import { createAdminBookingCancelledNotifications, createAdminBookingRescheduledNotifications } from '@/services/notifications';
 import { type AdminBookingRequest, type BookingStatus } from '@/types/admin-bookings';
@@ -181,6 +182,8 @@ export async function cancelClientBooking(id: string) {
     packageName: booking.packages?.name ?? 'package',
   });
 
+  emitBookingsChanged();
+
   return { success: true };
 }
 
@@ -350,6 +353,8 @@ export async function rescheduleClientBooking(id: string, schedule: BookingSched
     clientName: rescheduledBooking.profiles?.full_name ?? 'A client',
     packageName: rescheduledBooking.packages?.name ?? 'package',
   });
+
+  emitBookingsChanged();
 
   return { success: true };
 }

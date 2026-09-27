@@ -1,13 +1,14 @@
 import { Image, type ImageSource } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
 import { fallbackPortraitPackages } from '@/data/service-catalog';
 import { formatBookingDate, formatBookingTimeRange, formatShortBookingDate } from '@/services/admin-bookings';
+import { subscribeToBookingsChanged } from '@/services/booking-events';
 import { setSelectedPackage } from '@/services/booking-draft';
 import { cancelClientBooking, getClientBookings, getClientReschedulePackage } from '@/services/client-bookings';
 import { bookingEmptyStyles as styles } from '@/styles/booking-empty.styles';
@@ -30,6 +31,8 @@ export default function BookingScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [reschedulingBookingId, setReschedulingBookingId] = useState<string | null>(null);
   const [selectedBooking, setSelectedBooking] = useState<AdminBookingRequest | null>(null);
+  const bookingsRef = useRef<AdminBookingRequest[]>([]);
+  const hasLoadedBookings = useRef(false);
   const bottomPadding = bottomNavMetrics.height + insets.bottom;
   const availableContentHeight = Math.max(1, height - bottomPadding);
   const scale = Math.min(width / FIGMA_WIDTH, availableContentHeight / FIGMA_NAV_TOP);
@@ -44,14 +47,23 @@ export default function BookingScreen() {
     [activeFilter, bookings],
   );
 
-  async function refreshBookings() {
-    setIsLoading(true);
-    const items = await getClientBookings();
-
+  const applyBookingItems = useCallback((items: AdminBookingRequest[]) => {
+    bookingsRef.current = items;
+    hasLoadedBookings.current = true;
     setBookings(items);
     setSelectedBooking((current) => (current ? items.find((item) => item.id === current.id) ?? null : null));
+  }, []);
+
+  const refreshBookings = useCallback(async (showSkeleton = false) => {
+    if (showSkeleton) {
+      setIsLoading(true);
+    }
+
+    const items = await getClientBookings();
+
+    applyBookingItems(items);
     setIsLoading(false);
-  }
+  }, [applyBookingItems]);
 
   async function handleCancelBooking() {
     if (!cancelTarget) {
@@ -68,7 +80,7 @@ export default function BookingScreen() {
     }
 
     setCancelTarget(null);
-    await refreshBookings();
+    await refreshBookings(false);
     setIsCancelling(false);
     Alert.alert('Booking cancelled', 'The admin has been notified.');
   }
@@ -90,12 +102,15 @@ export default function BookingScreen() {
   useFocusEffect(
     useCallback(() => {
       let isMounted = true;
+      const shouldShowSkeleton = !hasLoadedBookings.current && bookingsRef.current.length === 0;
 
-      setIsLoading(true);
+      if (shouldShowSkeleton) {
+        setIsLoading(true);
+      }
+
       getClientBookings().then((items) => {
         if (isMounted) {
-          setBookings(items);
-          setSelectedBooking((current) => (current ? items.find((item) => item.id === current.id) ?? null : null));
+          applyBookingItems(items);
           setIsLoading(false);
         }
       });
@@ -103,7 +118,15 @@ export default function BookingScreen() {
       return () => {
         isMounted = false;
       };
-    }, []),
+    }, [applyBookingItems]),
+  );
+
+  useEffect(
+    () =>
+      subscribeToBookingsChanged(() => {
+        void refreshBookings(false);
+      }),
+    [refreshBookings],
   );
 
   return (
@@ -394,21 +417,35 @@ function CancelBookingDrawer({
   onCancel: () => void;
   onClose: () => void;
 }) {
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const drawerWidth = Math.min(width, 412);
+
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={Boolean(booking)}>
       <View style={styles.cancelDrawerOverlay}>
         <Pressable accessibilityLabel="Close cancel drawer" accessibilityRole="button" onPress={onClose} style={styles.cancelDrawerScrim} />
-        <View style={styles.cancelDrawer}>
+        <View style={[styles.cancelDrawer, { paddingBottom: Math.max(24, insets.bottom + 18), width: drawerWidth }]}>
           <View style={styles.cancelDrawerHandle} />
-          <Text style={styles.cancelDrawerTitle}>Cancel booking?</Text>
-          <Text style={styles.cancelDrawerText}>This will cancel your booking request and notify the admin.</Text>
-          {booking ? <Text style={styles.cancelDrawerBooking}>{booking.packageName}</Text> : null}
+          <View style={styles.cancelDrawerIconWrap}>
+            <TrashIcon size={32} />
+          </View>
+          <Text style={styles.cancelDrawerTitle}>Cancel this Booking?</Text>
+          <Text style={styles.cancelDrawerText}>This action will notify the studio and release your time slot.</Text>
           <View style={styles.cancelDrawerActions}>
-            <Pressable accessibilityRole="button" disabled={isCancelling} onPress={onClose} style={styles.keepBookingButton}>
-              <Text style={styles.keepBookingText}>Keep Booking</Text>
+            <Pressable
+              accessibilityRole="button"
+              disabled={isCancelling}
+              onPress={onCancel}
+              style={({ pressed }) => [styles.confirmCancelButton, (pressed || isCancelling) && { opacity: 0.72 }]}>
+              <Text style={styles.confirmCancelText}>{isCancelling ? 'Cancelling...' : 'Yes, Cancel'}</Text>
             </Pressable>
-            <Pressable accessibilityRole="button" disabled={isCancelling} onPress={onCancel} style={[styles.confirmCancelButton, isCancelling && { opacity: 0.72 }]}>
-              <Text style={styles.confirmCancelText}>{isCancelling ? 'Cancelling...' : 'Cancel Booking'}</Text>
+            <Pressable
+              accessibilityRole="button"
+              disabled={isCancelling}
+              onPress={onClose}
+              style={({ pressed }) => [styles.keepBookingButton, pressed && !isCancelling && { opacity: 0.88 }]}>
+              <Text style={styles.keepBookingText}>Keep Booking</Text>
             </Pressable>
           </View>
         </View>
@@ -620,6 +657,17 @@ function BrowseIcon({ size }: { size: number }) {
       <Rect x={14} y={3} width={7} height={7} rx={1.2} fill="#ffffff" />
       <Rect x={3} y={14} width={7} height={7} rx={1.2} fill="#ffffff" />
       <Rect x={14} y={14} width={7} height={7} rx={1.2} fill="#ffffff" />
+    </Svg>
+  );
+}
+
+function TrashIcon({ size }: { size: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M4.5 7H19.5" stroke="#142C4C" strokeLinecap="round" strokeWidth={2} />
+      <Path d="M9.5 7V5.2C9.5 4.5 10 4 10.7 4H13.3C14 4 14.5 4.5 14.5 5.2V7" stroke="#142C4C" strokeLinecap="round" strokeWidth={2} />
+      <Path d="M7 7L7.8 19.1C7.9 20.2 8.7 21 9.8 21H14.2C15.3 21 16.1 20.2 16.2 19.1L17 7" stroke="#142C4C" strokeLinejoin="round" strokeWidth={2} />
+      <Path d="M10.5 11V17M13.5 11V17" stroke="#142C4C" strokeLinecap="round" strokeWidth={2} />
     </Svg>
   );
 }

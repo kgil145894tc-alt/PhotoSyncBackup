@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { createAuditLog } from '@/services/audit-log';
 import { expirePastPendingBookings } from '@/services/booking-expiration';
+import { emitBookingsChanged } from '@/services/booking-events';
 import { createBookingStatusHistory } from '@/services/booking-status-history';
 import { createClientBookingStatusNotification } from '@/services/notifications';
 import { type AdminBookingRequest, type BookingStatus } from '@/types/admin-bookings';
@@ -223,6 +224,8 @@ export async function updateAdminBookingStatus(
       status,
     });
   }
+
+  emitBookingsChanged();
 
   return { success: true };
 }
