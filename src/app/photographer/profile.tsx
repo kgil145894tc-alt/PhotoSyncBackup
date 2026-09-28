@@ -3,34 +3,62 @@ import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import {
-  Alert,
+  Modal,
   Pressable,
   ScrollView,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
 
+import { LogoutConfirmationModal } from "@/components/logout-confirmation-modal";
 import { signOutPhotoSync } from "@/services/auth";
 import {
+  formatBusinessHours,
+  formatEditableWorkingTime,
   getStudioSettings,
+  parseWorkingTimeInput,
   saveStudioSettings,
   type StudioSettings,
 } from "@/services/studio-settings";
 import { bottomNavMetrics } from "@/styles/navigation.styles";
 import { photographerStyles as styles } from "@/styles/photographer.styles";
 
+type StudioSettingsNotice = {
+  message: string;
+  title: string;
+};
+
+type ComparableStudioSettings = Pick<
+  StudioSettings,
+  | "contactEmail"
+  | "contactPhone"
+  | "defaultShootLocation"
+  | "studioAddress"
+  | "studioName"
+  | "workingEndTime"
+  | "workingStartTime"
+>;
+
 export default function PhotographerProfileScreen() {
   const insets = useSafeAreaInsets();
-  const [businessHours, setBusinessHours] = useState("");
+  const { width } = useWindowDimensions();
   const [contactEmail, setContactEmail] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [defaultShootLocation, setDefaultShootLocation] = useState("");
+  const [isLogoutModalVisible, setIsLogoutModalVisible] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [lastSavedStudioSettings, setLastSavedStudioSettings] = useState<ComparableStudioSettings | null>(null);
   const [studioAddress, setStudioAddress] = useState("");
+  const [studioSettingsNotice, setStudioSettingsNotice] = useState<StudioSettingsNotice | null>(null);
   const [studioName, setStudioName] = useState("PhotoSync Studio");
+  const [workingEndTime, setWorkingEndTime] = useState("5:00 PM");
+  const [workingStartTime, setWorkingStartTime] = useState("8:00 AM");
+  const profileWidth = Math.min(width, 412);
   const bottomPadding = bottomNavMetrics.height + insets.bottom + 24;
 
   useEffect(() => {
@@ -43,7 +71,9 @@ export default function PhotographerProfileScreen() {
         setContactPhone(settings.contactPhone);
         setContactEmail(settings.contactEmail);
         setDefaultShootLocation(settings.defaultShootLocation);
-        setBusinessHours(settings.businessHours);
+        setWorkingStartTime(formatEditableWorkingTime(settings.workingStartTime));
+        setWorkingEndTime(formatEditableWorkingTime(settings.workingEndTime));
+        setLastSavedStudioSettings(normalizeStudioSettingsForComparison(settings));
       }
     });
 
@@ -58,61 +88,118 @@ export default function PhotographerProfileScreen() {
     }
 
     if (!studioName.trim()) {
-      Alert.alert("Missing studio name", "Please enter your studio name.");
+      setStudioSettingsNotice({
+        message: "Please enter your studio name.",
+        title: "Missing studio name",
+      });
+      return;
+    }
+
+    const parsedWorkingStartTime = parseWorkingTimeInput(workingStartTime);
+    const parsedWorkingEndTime = parseWorkingTimeInput(workingEndTime);
+
+    if (!parsedWorkingStartTime || !parsedWorkingEndTime) {
+      setStudioSettingsNotice({
+        message: "Please enter times like 8:00 AM, 1:30 PM, or 17:00.",
+        title: "Check working hours",
+      });
+      return;
+    }
+
+    if (parsedWorkingStartTime >= parsedWorkingEndTime) {
+      setStudioSettingsNotice({
+        message: "End time must be later than start time.",
+        title: "Check working hours",
+      });
       return;
     }
 
     const settings: StudioSettings = {
-      businessHours,
+      businessHours: formatBusinessHours(parsedWorkingStartTime, parsedWorkingEndTime),
       contactEmail,
       contactPhone,
       defaultShootLocation,
+      workingEndTime: parsedWorkingEndTime,
+      workingStartTime: parsedWorkingStartTime,
       studioAddress,
       studioName,
     };
+    const normalizedSettings = normalizeStudioSettingsForComparison(settings);
+
+    if (lastSavedStudioSettings && areStudioSettingsEqual(normalizedSettings, lastSavedStudioSettings)) {
+      setStudioSettingsNotice({
+        message: "Your studio information is already up to date.",
+        title: "No changes to save",
+      });
+      return;
+    }
 
     setIsSaving(true);
     const result = await saveStudioSettings(settings);
     setIsSaving(false);
 
     if (!result.success) {
-      Alert.alert(
-        "Studio settings not saved",
-        result.message ?? "Please try again.",
-      );
+      setStudioSettingsNotice({
+        message: result.message ?? "Please try again.",
+        title: "Studio settings not saved",
+      });
       return;
     }
 
-    Alert.alert(
-      "Studio settings saved",
-      "Your studio information has been updated.",
-    );
+    setWorkingStartTime(formatEditableWorkingTime(parsedWorkingStartTime));
+    setWorkingEndTime(formatEditableWorkingTime(parsedWorkingEndTime));
+    setLastSavedStudioSettings(normalizedSettings);
+
+    setStudioSettingsNotice({
+      message: "Your studio information has been updated.",
+      title: "Studio settings saved",
+    });
+  }
+
+  async function handleConfirmLogout() {
+    if (isSigningOut) {
+      return;
+    }
+
+    setIsSigningOut(true);
+    await signOutPhotoSync();
+    setIsSigningOut(false);
+    setIsLogoutModalVisible(false);
+    router.replace("/");
   }
 
   return (
     <View style={styles.container}>
       <Image
         contentFit="cover"
-        source={require("@/assets/images/admin-calendar-background.png")}
-        style={styles.servicesFigmaBackground}
+        source={require("@/assets/images/figma-admin-profile/admin-profile-background.png")}
+        style={styles.adminProfileBackgroundImage}
       />
       <StatusBar style="dark" />
       <ScrollView
         bounces={false}
         contentContainerStyle={[
           styles.adminProfileContent,
-          { paddingBottom: bottomPadding },
+          {
+            paddingBottom: bottomPadding + 8,
+            paddingTop: insets.top + 20,
+            width: profileWidth,
+          },
         ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        style={styles.adminProfileScrollView}
       >
         <View style={styles.simpleProfileHeader}>
           <View style={styles.simpleProfileLogo}>
             <Image
               contentFit="contain"
-              source={require("@/assets/images/admin-calendar-logo.png")}
-              style={styles.servicesCategoryBrandLogo}
+              source={require("@/assets/images/figma-admin-profile/admin-profile-logo.png")}
+              style={styles.adminProfileLogoImage}
             />
+            <View style={styles.adminProfileCameraBadge}>
+              <CameraBadgeIcon />
+            </View>
           </View>
           <Text style={styles.simpleProfileName}>{studioName || "Admin"}</Text>
           <Text style={styles.simpleProfileRole}>Studio Administrator</Text>
@@ -151,12 +238,11 @@ export default function PhotographerProfileScreen() {
             placeholder="Example: PhotoSync Studio"
             value={defaultShootLocation}
           />
-          <StudioInput
-            label="Business Hours"
-            multiline
-            onChangeText={setBusinessHours}
-            placeholder="Example: Mon-Sat, 8:00 AM - 5:00 PM"
-            value={businessHours}
+          <BusinessHoursInput
+            endTime={workingEndTime}
+            onChangeEndTime={setWorkingEndTime}
+            onChangeStartTime={setWorkingStartTime}
+            startTime={workingStartTime}
           />
 
           <Pressable
@@ -178,10 +264,7 @@ export default function PhotographerProfileScreen() {
         <Pressable
           accessibilityLabel="Log out"
           accessibilityRole="button"
-          onPress={async () => {
-            await signOutPhotoSync();
-            router.replace("/");
-          }}
+          onPress={() => setIsLogoutModalVisible(true)}
           style={({ pressed }) => [
             styles.simpleLogoutButton,
             pressed && { opacity: 0.82 },
@@ -191,6 +274,56 @@ export default function PhotographerProfileScreen() {
           <Text style={styles.simpleLogoutText}>Log Out</Text>
         </Pressable>
       </ScrollView>
+
+      <LogoutConfirmationModal
+        isLoading={isSigningOut}
+        onCancel={() => setIsLogoutModalVisible(false)}
+        onConfirm={handleConfirmLogout}
+        visible={isLogoutModalVisible}
+      />
+
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setStudioSettingsNotice(null)}
+        transparent
+        visible={studioSettingsNotice !== null}
+      >
+        <View style={styles.deleteTimeSlotOverlay}>
+          <View style={styles.deleteTimeSlotCard}>
+            <Pressable
+              accessibilityLabel="Close studio settings notice"
+              accessibilityRole="button"
+              hitSlop={10}
+              onPress={() => setStudioSettingsNotice(null)}
+              style={({ pressed }) => [
+                styles.deleteTimeSlotCloseButton,
+                pressed && { opacity: 0.72 },
+              ]}
+            >
+              <NoticeCloseIcon />
+            </Pressable>
+            <StudioSettingsNoticeIcon />
+            <Text style={styles.deleteTimeSlotTitle}>
+              {studioSettingsNotice?.title}
+            </Text>
+            <Text style={styles.deleteTimeSlotMessage}>
+              {studioSettingsNotice?.message}
+            </Text>
+            <View style={styles.deleteTimeSlotActions}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setStudioSettingsNotice(null)}
+                style={({ pressed }) => [
+                  styles.timeSlotNoticeOkButton,
+                  pressed && { opacity: 0.82 },
+                ]}
+              >
+                <Text style={styles.timeSlotNoticeOkText}>OK</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -212,7 +345,7 @@ function StudioInput({
 }) {
   return (
     <View style={styles.studioField}>
-      <Text style={styles.formLabel}>{label}</Text>
+      <Text style={styles.studioFormLabel}>{label}</Text>
       <TextInput
         autoCapitalize={keyboardType === "email-address" ? "none" : "sentences"}
         keyboardType={keyboardType}
@@ -220,25 +353,69 @@ function StudioInput({
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor="#8AA3C3"
-        style={[styles.formInput, multiline && styles.formTextarea]}
+        style={[styles.studioFormInput, multiline && styles.studioAddressInput]}
         value={value}
       />
     </View>
   );
 }
 
-function CameraLogo() {
+function BusinessHoursInput({
+  endTime,
+  onChangeEndTime,
+  onChangeStartTime,
+  startTime,
+}: {
+  endTime: string;
+  onChangeEndTime: (value: string) => void;
+  onChangeStartTime: (value: string) => void;
+  startTime: string;
+}) {
   return (
-    <Svg width={54} height={44} viewBox="0 0 32 26" fill="none">
-      <Path
-        d="M28.4 6.2H23.6L22.3 3.2C22 2.5 21.4 2 20.6 2H11.4C10.6 2 10 2.5 9.7 3.2L8.4 6.2H3.6C2.2 6.2 1 7.4 1 8.8V22.4C1 23.8 2.2 25 3.6 25H28.4C29.8 25 31 23.8 31 22.4V8.8C31 7.4 29.8 6.2 28.4 6.2Z"
-        stroke="#ffffff"
-        strokeLinejoin="round"
-        strokeWidth={2.4}
-      />
-      <Circle cx={16} cy={15.5} r={5.9} stroke="#ffffff" strokeWidth={2.4} />
-      <Circle cx={26.2} cy={10.1} r={1.3} fill="#ffffff" />
-    </Svg>
+    <View style={styles.studioField}>
+      <Text style={styles.studioFormLabel}>Business Hours</Text>
+      <View style={styles.businessHoursInputRow}>
+        <TextInput
+          onChangeText={onChangeStartTime}
+          placeholder="8:00 AM"
+          placeholderTextColor="#8AA3C3"
+          style={[styles.studioFormInput, styles.businessHoursInput]}
+          value={startTime}
+        />
+        <Text style={styles.businessHoursSeparator}>to</Text>
+        <TextInput
+          onChangeText={onChangeEndTime}
+          placeholder="5:00 PM"
+          placeholderTextColor="#8AA3C3"
+          style={[styles.studioFormInput, styles.businessHoursInput]}
+          value={endTime}
+        />
+      </View>
+    </View>
+  );
+}
+
+function normalizeStudioSettingsForComparison(settings: StudioSettings): ComparableStudioSettings {
+  return {
+    contactEmail: settings.contactEmail.trim(),
+    contactPhone: settings.contactPhone.trim(),
+    defaultShootLocation: settings.defaultShootLocation.trim(),
+    studioAddress: settings.studioAddress.trim(),
+    studioName: settings.studioName.trim(),
+    workingEndTime: settings.workingEndTime,
+    workingStartTime: settings.workingStartTime,
+  };
+}
+
+function areStudioSettingsEqual(first: ComparableStudioSettings, second: ComparableStudioSettings) {
+  return (
+    first.contactEmail === second.contactEmail &&
+    first.contactPhone === second.contactPhone &&
+    first.defaultShootLocation === second.defaultShootLocation &&
+    first.studioAddress === second.studioAddress &&
+    first.studioName === second.studioName &&
+    first.workingEndTime === second.workingEndTime &&
+    first.workingStartTime === second.workingStartTime
   );
 }
 
@@ -247,18 +424,60 @@ function LogoutIcon() {
     <Svg width={23} height={23} viewBox="0 0 24 24" fill="none">
       <Path
         d="M10 5H6C5.4 5 5 5.4 5 6V18C5 18.6 5.4 19 6 19H10"
-        stroke="#E45F62"
+        stroke="#ffffff"
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth={2.2}
       />
       <Path
         d="M14 8L18 12L14 16M18 12H10"
-        stroke="#E45F62"
+        stroke="#ffffff"
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth={2.2}
       />
+    </Svg>
+  );
+}
+
+function CameraBadgeIcon() {
+  return (
+    <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M7.6 7.2L8.7 4.8C8.9 4.3 9.4 4 10 4H14C14.6 4 15.1 4.3 15.3 4.8L16.4 7.2H18.2C19.7 7.2 21 8.5 21 10V17.2C21 18.7 19.7 20 18.2 20H5.8C4.3 20 3 18.7 3 17.2V10C3 8.5 4.3 7.2 5.8 7.2H7.6Z"
+        fill="#ffffff"
+      />
+      <Path
+        d="M12 17C14.2 17 16 15.2 16 13C16 10.8 14.2 9 12 9C9.8 9 8 10.8 8 13C8 15.2 9.8 17 12 17Z"
+        fill="#142C4C"
+      />
+      <Path
+        d="M12 15.2C13.2 15.2 14.2 14.2 14.2 13C14.2 11.8 13.2 10.8 12 10.8C10.8 10.8 9.8 11.8 9.8 13C9.8 14.2 10.8 15.2 12 15.2Z"
+        fill="#ffffff"
+      />
+    </Svg>
+  );
+}
+
+function StudioSettingsNoticeIcon() {
+  return (
+    <Svg width={100} height={100} viewBox="0 0 100 100" fill="none">
+      <Circle cx={50} cy={50} r={50} fill="#E5EEF9" />
+      <Path
+        d="M50 28V56"
+        stroke="#142C4C"
+        strokeLinecap="round"
+        strokeWidth={7}
+      />
+      <Circle cx={50} cy={70} r={4.5} fill="#142C4C" />
+    </Svg>
+  );
+}
+
+function NoticeCloseIcon() {
+  return (
+    <Svg width={34} height={34} viewBox="0 0 34 34" fill="none">
+      <Path d="M11 11L23 23M23 11L11 23" stroke="#142C4C" strokeLinecap="round" strokeWidth={2.4} />
     </Svg>
   );
 }

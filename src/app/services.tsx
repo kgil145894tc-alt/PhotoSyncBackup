@@ -13,6 +13,10 @@ import { ServiceCatalogItem } from '@/types/services';
 
 const FIGMA_WIDTH = 412;
 const SERVICE_SKELETON_TOPS = [264, 364, 464, 564];
+const SERVICE_LIST_START = 15;
+const SERVICE_CARD_HEIGHT = 92;
+const SERVICE_CARD_GAP = 8;
+const SERVICE_LIST_BOTTOM_PADDING = 28;
 
 export default function ServicesScreen() {
   const { height, width } = useWindowDimensions();
@@ -32,9 +36,11 @@ export default function ServicesScreen() {
   const heroHeight = 249;
   const listTop = heroHeight;
   const listHeight = Math.max(1, contentHeight - y(listTop));
-  const listContentHeight = services.length
-    ? px(services[services.length - 1].top + 92 - listTop + 20)
-    : px(SERVICE_SKELETON_TOPS[SERVICE_SKELETON_TOPS.length - 1] + 92 - listTop + 20);
+  const listItemCount = services.length || SERVICE_SKELETON_TOPS.length;
+  const listContentHeight = Math.max(
+    listHeight + 1,
+    px(SERVICE_LIST_START + listItemCount * SERVICE_CARD_HEIGHT + Math.max(0, listItemCount - 1) * SERVICE_CARD_GAP + SERVICE_LIST_BOTTOM_PADDING),
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -101,15 +107,15 @@ export default function ServicesScreen() {
 
         <ScrollView
           bounces={false}
-          contentContainerStyle={[styles.listScrollContent, { height: listContentHeight }]}
+          contentContainerStyle={[styles.listScrollContent, { minHeight: listContentHeight }]}
           showsVerticalScrollIndicator={false}
           style={[styles.listScrollView, { left: 0, top: y(listTop), width, height: listHeight }]}>
           {services.length ? (
             services.map((service, index) => (
-              <ServiceCard index={index} key={service.id} listTop={listTop} service={service} px={px} x={x} />
+              <ServiceCard index={index} key={service.id} service={service} px={px} x={x} />
             ))
           ) : isLoading ? (
-            <ServiceSkeletonList listTop={listTop} px={px} x={x} />
+            <ServiceSkeletonList px={px} x={x} />
           ) : (
             <Text style={[styles.cardDescription, { left: x(149), top: px(38), width: px(160), fontSize: px(10), lineHeight: px(14) }]}>
               No services available yet.
@@ -124,18 +130,17 @@ export default function ServicesScreen() {
 function ServiceCard({
   index,
   service,
-  listTop,
   px,
   x,
 }: {
   index: number;
-  listTop: number;
   service: ServiceCatalogItem;
   px: (value: number) => number;
   x: (value: number) => number;
 }) {
   const titleSize = service.titleSize ?? 13;
   const [intro] = useState(() => new Animated.Value(0));
+  const cardTop = SERVICE_LIST_START + index * (SERVICE_CARD_HEIGHT + SERVICE_CARD_GAP);
 
   useEffect(() => {
     intro.setValue(0);
@@ -155,7 +160,7 @@ function ServiceCard({
         {
           left: x(28),
           opacity: intro,
-          top: px(service.top - listTop),
+          top: px(cardTop),
           transform: [
             {
               translateY: intro.interpolate({
@@ -223,11 +228,9 @@ function ServiceCard({
 }
 
 function ServiceSkeletonList({
-  listTop,
   px,
   x,
 }: {
-  listTop: number;
   px: (value: number) => number;
   x: (value: number) => number;
 }) {
@@ -235,7 +238,7 @@ function ServiceSkeletonList({
 
   return (
     <>
-      {SERVICE_SKELETON_TOPS.map((top) => (
+      {SERVICE_SKELETON_TOPS.map((top, index) => (
         <Animated.View
           accessibilityLabel="Loading service"
           accessibilityRole="progressbar"
@@ -245,7 +248,7 @@ function ServiceSkeletonList({
             {
               left: x(28),
               opacity: pulse,
-              top: px(top - listTop),
+              top: px(SERVICE_LIST_START + index * (SERVICE_CARD_HEIGHT + SERVICE_CARD_GAP)),
               width: px(356),
               height: px(92),
               borderRadius: px(10),

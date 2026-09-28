@@ -34,7 +34,7 @@ export default function EditProfileScreen() {
           setEmail(profile.email);
           setFullName(profile.fullName);
           setPhone(profile.phone);
-          setUsername(getUsername(profile.email, profile.fullName));
+          setUsername(profile.username);
         }
       });
 
@@ -110,6 +110,7 @@ export default function EditProfileScreen() {
       avatarUrl: nextAvatarUrl,
       fullName,
       phone,
+      username,
     });
 
     if (!result.success) {
@@ -272,16 +273,6 @@ function EditDefaultAvatar() {
       <View style={styles.editDefaultAvatarBody} />
     </View>
   );
-}
-
-function getUsername(email: string, fullName: string) {
-  const emailUsername = email.split('@')[0]?.trim();
-
-  if (emailUsername) {
-    return emailUsername;
-  }
-
-  return fullName.trim().toLowerCase().replace(/\s+/g, '');
 }
 
 function BackIcon() {

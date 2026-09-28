@@ -1,5 +1,7 @@
 import { StyleSheet } from 'react-native';
 
+import { clientUi } from '@/styles/client-ui.styles';
+
 export const bookingEmptyStyles = StyleSheet.create({
   container: {
     flex: 1,
@@ -50,7 +52,7 @@ export const bookingEmptyStyles = StyleSheet.create({
   browseButton: {
     position: 'absolute',
     alignItems: 'center',
-    backgroundColor: '#142C4C',
+    backgroundColor: clientUi.colors.ink,
     flexDirection: 'row',
     justifyContent: 'center',
     shadowColor: '#000000',
@@ -61,7 +63,7 @@ export const bookingEmptyStyles = StyleSheet.create({
   },
   browseText: {
     color: '#ffffff',
-    fontFamily: 'Jomolhari',
+    fontFamily: 'InterSemiBold',
     includeFontPadding: false,
   },
   dividerLine: {
@@ -298,9 +300,18 @@ export const bookingEmptyStyles = StyleSheet.create({
   },
   bookingHeader: {
     position: 'absolute',
-    backgroundColor: '#142C4C',
+    backgroundColor: clientUi.colors.navBlue,
     left: 0,
+    overflow: 'hidden',
     top: 0,
+  },
+  bookingHeaderTexture: {
+    height: '220%',
+    opacity: 0.58,
+    position: 'absolute',
+    right: 0,
+    top: '-62%',
+    width: '190%',
   },
   bookingHeaderTitle: {
     position: 'absolute',
@@ -441,9 +452,10 @@ export const bookingEmptyStyles = StyleSheet.create({
   detailHeroImage: {
     position: 'absolute',
   },
-  detailBackground: {
+  bookingDetailBodyShell: {
     position: 'absolute',
-    opacity: 0.7,
+    backgroundColor: '#ffffff',
+    overflow: 'hidden',
   },
   detailInfoCard: {
     position: 'absolute',
@@ -551,13 +563,13 @@ export const bookingEmptyStyles = StyleSheet.create({
   detailPrimaryButton: {
     position: 'absolute',
     alignItems: 'center',
-    backgroundColor: '#142C4C',
+    backgroundColor: clientUi.colors.ink,
     flexDirection: 'row',
     justifyContent: 'center',
   },
   detailPrimaryButtonText: {
     color: '#ffffff',
-    fontFamily: 'Jomolhari',
+    fontFamily: 'InterSemiBold',
     includeFontPadding: false,
     marginLeft: 10,
   },

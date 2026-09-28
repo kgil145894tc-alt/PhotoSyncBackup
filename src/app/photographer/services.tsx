@@ -2,11 +2,11 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
-import { fallbackPortraitPackages, fallbackServices } from '@/data/service-catalog';
+import { AdminBrandHeader } from '@/components/admin-brand-header';
 import {
   getCachedAdminPackagesCatalog,
   getCachedAdminServicesCatalog,
@@ -136,48 +136,24 @@ export default function PhotographerServicesScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, styles.adminCurvedHeaderScreen]}>
       <StatusBar style="light" />
-      <Image
-        contentFit="cover"
-        source={require('@/assets/images/admin-calendar-background.png')}
-        style={styles.servicesFigmaBackground}
+      <AdminBrandHeader
+        textureSource={require('@/assets/images/admin-calendar-banner.png')}
+        topInset={insets.top}
       />
-      <View style={[styles.servicesFigmaTopBand, { height: insets.top + 132 }]}>
+      <View
+        style={[
+          styles.servicesFigmaSurface,
+          { paddingBottom: bottomPadding },
+        ]}>
         <Image
           contentFit="cover"
-          source={require('@/assets/images/admin-requests-header-camera.png')}
-          style={styles.servicesFigmaTopTexture}
+          source={require('@/assets/images/admin-calendar-background.png')}
+          style={styles.servicesFigmaBackground}
         />
-      </View>
-      {activeView === 'categories' ? (
-        <View style={[styles.servicesCategoryBrandRow, { top: insets.top + 28 }]}>
-          <Text style={styles.servicesCategoryBrandText}>PhotoSync</Text>
-          <Image
-            contentFit="contain"
-            source={require('@/assets/images/admin-calendar-logo.png')}
-            style={styles.servicesCategoryBrandLogo}
-          />
-        </View>
-      ) : null}
-      <ScrollView
-        bounces={false}
-        contentContainerStyle={[
-          styles.servicesFigmaContent,
-          { paddingBottom: bottomPadding, paddingTop: activeView === 'packages' ? insets.top + 80 : insets.top + 132 },
-        ]}
-        showsVerticalScrollIndicator={false}>
         {activeView === 'packages' ? (
           <>
-            <View style={styles.servicesBrandRow}>
-              <Text style={styles.servicesBrandText}>PhotoSync</Text>
-              <Image
-                contentFit="contain"
-                source={require('@/assets/images/admin-calendar-logo.png')}
-                style={styles.servicesBrandLogo}
-              />
-            </View>
-
             <View style={styles.servicesPackageHeader}>
               <Pressable
                 accessibilityLabel="Back to service categories"
@@ -200,7 +176,11 @@ export default function PhotographerServicesScreen() {
               </Pressable>
             </View>
 
-            <View style={styles.servicesPackageList}>
+            <ScrollView
+              bounces={false}
+              contentContainerStyle={styles.servicesPackageList}
+              showsVerticalScrollIndicator={false}
+              style={styles.servicesFigmaListScroller}>
               {visiblePackages.length ? (
                 visiblePackages.map((item) => (
                   <AdminPackageItem
@@ -221,7 +201,7 @@ export default function PhotographerServicesScreen() {
                   <Text style={styles.servicesEmptyPackagesText}>Add a package for this service to show it here.</Text>
                 </View>
               )}
-            </View>
+            </ScrollView>
           </>
         ) : (
           <>
@@ -237,7 +217,11 @@ export default function PhotographerServicesScreen() {
               </Pressable>
             </View>
 
-            <View style={styles.servicesCategoryFigmaList}>
+            <ScrollView
+              bounces={false}
+              contentContainerStyle={styles.servicesCategoryFigmaList}
+              showsVerticalScrollIndicator={false}
+              style={styles.servicesFigmaListScroller}>
               {activeServices.map((service) => (
                 <AdminServiceItem
                   key={service.id}
@@ -253,10 +237,10 @@ export default function PhotographerServicesScreen() {
                   service={service}
                 />
               ))}
-            </View>
+            </ScrollView>
           </>
         )}
-      </ScrollView>
+      </View>
 
       <ServiceFormModal
         key={`service-${editingService?.id ?? 'new'}-${isServiceFormVisible}`}
@@ -383,6 +367,7 @@ function ServiceFormModal({
   visible: boolean;
 }) {
   const insets = useSafeAreaInsets();
+  const isKeyboardVisible = useKeyboardVisible();
   const [basePrice, setBasePrice] = useState(service ? String(service.basePrice) : '');
   const [bufferMinutes, setBufferMinutes] = useState(service?.bufferMinutes ? String(service.bufferMinutes) : '30');
   const [description, setDescription] = useState(service?.description ?? '');
@@ -440,7 +425,10 @@ function ServiceFormModal({
 
   return (
     <Modal animationType="slide" onRequestClose={onClose} visible={visible}>
-      <View style={formStyles.screen}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={0}
+        style={formStyles.screen}>
         <Image
           contentFit="cover"
           source={require('@/assets/images/admin-calendar-background.png')}
@@ -448,8 +436,15 @@ function ServiceFormModal({
         />
         <ScrollView
           bounces={false}
-          contentContainerStyle={[formStyles.scrollContent, { paddingTop: insets.top + 26 }]}
+          contentContainerStyle={[
+            formStyles.scrollContent,
+            {
+              paddingBottom: isKeyboardVisible ? insets.bottom + 160 : insets.bottom + 56,
+              paddingTop: insets.top + 26,
+            },
+          ]}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
           showsVerticalScrollIndicator={false}>
           <View style={formStyles.header}>
             <Pressable accessibilityLabel="Close service form" accessibilityRole="button" hitSlop={10} onPress={onClose} style={formStyles.backButton}>
@@ -475,7 +470,7 @@ function ServiceFormModal({
           <ActiveToggle isActive={isActive} onPress={() => setIsActive((value) => !value)} />
           <FormActions isSaving={isSaving} onCancel={onClose} onSave={handleSave} saveLabel="Save Service" />
         </ScrollView>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -494,6 +489,7 @@ function PackageFormModal({
   visible: boolean;
 }) {
   const insets = useSafeAreaInsets();
+  const isKeyboardVisible = useKeyboardVisible();
   const [badge, setBadge] = useState(item?.badge ?? '');
   const [inclusions, setInclusions] = useState(item?.inclusions.length ? item.inclusions : ['']);
   const [isActive, setIsActive] = useState(item?.isActive ?? true);
@@ -563,7 +559,10 @@ function PackageFormModal({
 
   return (
     <Modal animationType="slide" onRequestClose={onClose} visible={visible}>
-      <View style={formStyles.screen}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={0}
+        style={formStyles.screen}>
         <Image
           contentFit="cover"
           source={require('@/assets/images/admin-calendar-background.png')}
@@ -571,8 +570,15 @@ function PackageFormModal({
         />
         <ScrollView
           bounces={false}
-          contentContainerStyle={[formStyles.scrollContent, { paddingTop: insets.top + 26 }]}
+          contentContainerStyle={[
+            formStyles.scrollContent,
+            {
+              paddingBottom: isKeyboardVisible ? insets.bottom + 180 : insets.bottom + 56,
+              paddingTop: insets.top + 26,
+            },
+          ]}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
           showsVerticalScrollIndicator={false}>
           <View style={formStyles.header}>
             <Pressable accessibilityLabel="Close package form" accessibilityRole="button" hitSlop={10} onPress={onClose} style={formStyles.backButton}>
@@ -618,10 +624,9 @@ function PackageFormModal({
           <ImagePickerField
             fallbackSource={item?.image}
             imageUrl={item?.imageUrl}
-            label="Add Photo (Category and Package)"
+            label="Add Package Photo"
             pickedImage={pickedImage}
             onPick={setPickedImage}
-            showEmptyPair
           />
 
           <View style={formStyles.inclusionsHeader}>
@@ -648,9 +653,29 @@ function PackageFormModal({
           <ActiveToggle isActive={isActive} onPress={() => setIsActive((value) => !value)} />
           <FormActions isSaving={isSaving} onCancel={onClose} onSave={handleSave} saveLabel="Save Service" />
         </ScrollView>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
+}
+
+function useKeyboardVisible() {
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener('keyboardDidShow', () => {
+      setIsKeyboardVisible(true);
+    });
+    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
+      setIsKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
+  return isKeyboardVisible;
 }
 
 function ImagePickerField({
@@ -659,14 +684,12 @@ function ImagePickerField({
   label,
   onPick,
   pickedImage,
-  showEmptyPair = false,
 }: {
   fallbackSource?: PackageCatalogItem['image'];
   imageUrl?: string | null;
   label: string;
   onPick: (image: ImagePicker.ImagePickerAsset) => void;
   pickedImage: ImagePicker.ImagePickerAsset | null;
-  showEmptyPair?: boolean;
 }) {
   const previewSource = pickedImage?.uri ? { uri: pickedImage.uri } : imageUrl ? { uri: imageUrl } : fallbackSource;
 
@@ -706,14 +729,6 @@ function ImagePickerField({
             </>
           )}
         </Pressable>
-        {showEmptyPair ? (
-          <Pressable accessibilityRole="button" onPress={pickImage} style={formStyles.photoBox}>
-            <CameraIcon />
-            <Text style={formStyles.photoText}>
-              Drop your image here, or <Text style={formStyles.browseText}>browse</Text>
-            </Text>
-          </Pressable>
-        ) : null}
       </View>
       <Text style={formStyles.hint}>JPG or PNG works best.</Text>
     </View>
@@ -753,7 +768,9 @@ function FormInput({
 function ActiveToggle({ isActive, onPress }: { isActive: boolean; onPress: () => void }) {
   return (
     <Pressable accessibilityRole="switch" accessibilityState={{ checked: isActive }} onPress={onPress} style={formStyles.activeRow}>
-      <View style={[formStyles.activeBox, isActive && formStyles.activeBoxOn]} />
+      <View style={[formStyles.activeSwitchTrack, isActive && formStyles.activeSwitchTrackOn]}>
+        <View style={[formStyles.activeSwitchThumb, isActive && formStyles.activeSwitchThumbOn]} />
+      </View>
       <Text style={formStyles.activeText}>{isActive ? 'Active' : 'Inactive'}</Text>
     </Pressable>
   );

@@ -5,10 +5,14 @@ import { useEffect } from 'react';
 import { useColorScheme, View } from 'react-native';
 
 import { BottomNav } from '@/components/bottom-nav';
+import { supabase } from '@/lib/supabase';
 import { isBottomNavVisible, useStackSlideAnimation } from '@/navigation/tab-navigation';
+import { observePushNotificationResponses, syncPushNotificationToken } from '@/services/push-notifications';
 import { bottomNavStyles } from '@/styles/navigation.styles';
 
 SplashScreen.preventAutoHideAsync();
+
+const STACK_SLIDE_ANIMATION_DURATION_MS = 180;
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -33,6 +37,27 @@ export default function RootLayout() {
     }
   }, [fontError, fontsLoaded]);
 
+  useEffect(() => {
+    if (!fontsLoaded && !fontError) {
+      return;
+    }
+
+    syncPushNotificationToken();
+
+    const unsubscribeFromNotifications = observePushNotificationResponses();
+    const { data: authListener } =
+      supabase?.auth.onAuthStateChange((event) => {
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          syncPushNotificationToken();
+        }
+      }) ?? {};
+
+    return () => {
+      unsubscribeFromNotifications();
+      authListener?.subscription.unsubscribe();
+    };
+  }, [fontError, fontsLoaded]);
+
   if (!fontsLoaded && !fontError) {
     return null;
   }
@@ -40,7 +65,16 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <View style={bottomNavStyles.appShell}>
-        <Stack screenOptions={{ animation: stackSlideAnimation, headerShown: false }} />
+        <Stack
+          screenOptions={{
+            animation: stackSlideAnimation,
+            animationDuration: STACK_SLIDE_ANIMATION_DURATION_MS,
+            headerShown: false,
+          }}>
+          <Stack.Screen name="book/schedule" options={{ animation: 'none' }} />
+          <Stack.Screen name="book/information" options={{ animation: 'none' }} />
+          <Stack.Screen name="book/review" options={{ animation: 'none' }} />
+        </Stack>
         {showBottomNav && <BottomNav />}
       </View>
     </ThemeProvider>

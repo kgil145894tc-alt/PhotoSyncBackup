@@ -109,6 +109,9 @@ export const bookingScheduleStyles = StyleSheet.create({
   disabledDayText: {
     color: '#B9B9B9',
   },
+  unavailableDayText: {
+    color: '#E45F62',
+  },
   selectedDay: {
     backgroundColor: '#D1E2F7',
   },

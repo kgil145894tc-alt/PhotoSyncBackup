@@ -2,6 +2,7 @@ export type BookingStatus = 'cancelled' | 'completed' | 'confirmed' | 'expired' 
 
 export type AdminBookingRequest = {
   bookingDate: string;
+  clientAvatarUrl?: string | null;
   clientEmail: string;
   clientId: string;
   clientName: string;

@@ -4,6 +4,7 @@ import { expirePastPendingBookings } from '@/services/booking-expiration';
 import { emitBookingsChanged } from '@/services/booking-events';
 import { createBookingStatusHistory } from '@/services/booking-status-history';
 import { createClientBookingStatusNotification } from '@/services/notifications';
+import { getDefaultWorkingHoursWindow } from '@/services/studio-settings';
 import { type AdminBookingRequest, type BookingStatus } from '@/types/admin-bookings';
 
 type BookingRow = {
@@ -16,11 +17,13 @@ type BookingRow = {
   id: string;
   notes: string | null;
   packages: {
+    image_url: string | null;
     inclusions: string[] | null;
     name: string;
     price: number;
   } | null;
   profiles: {
+    avatar_url: string | null;
     email: string | null;
     full_name: string | null;
     phone: string | null;
@@ -49,10 +52,6 @@ type BookingConfirmationRow = {
   start_time: string;
 };
 
-const defaultAvailabilityWindows = [
-  { endTime: '17:00:00', startTime: '08:00:00' },
-];
-
 export async function getAdminBookingRequests(): Promise<AdminBookingRequest[]> {
   if (!supabase) {
     return [];
@@ -78,9 +77,9 @@ export async function getAdminBookingRequests(): Promise<AdminBookingRequest[]> 
       session_theme,
       special_requests,
       rejection_reason,
-      profiles:client_id(full_name, phone, email),
+      profiles:client_id(avatar_url, full_name, phone, email),
       services:service_id(name),
-      packages:package_id(name, price, inclusions)
+      packages:package_id(name, price, inclusions, image_url)
     `)
     .order('created_at', { ascending: false });
 
@@ -116,9 +115,9 @@ export async function getAdminBookingRequest(id: string): Promise<AdminBookingRe
       session_theme,
       special_requests,
       rejection_reason,
-      profiles:client_id(full_name, phone, email),
+      profiles:client_id(avatar_url, full_name, phone, email),
       services:service_id(name),
-      packages:package_id(name, price, inclusions)
+      packages:package_id(name, price, inclusions, image_url)
     `)
     .eq('id', id)
     .maybeSingle();
@@ -347,14 +346,14 @@ async function checkAdminConfirmationAvailability({
     end: selectedAppointment.end + bufferMinutes,
     start: Math.max(0, selectedAppointment.start - bufferMinutes),
   };
-  const availabilityWindows = [
-    ...defaultAvailabilityWindows,
-    ...(availableWindows ?? []).map((slot) => ({
-      endTime: slot.end_time as string,
-      startTime: slot.start_time as string,
-    })),
-  ];
-  const fitsAvailabilityWindow = availabilityWindows.some((window) => {
+  const customAvailabilityWindows = (availableWindows ?? []).map((slot) => ({
+    endTime: slot.end_time as string,
+    startTime: slot.start_time as string,
+  }));
+  const availabilityWindowsToCheck = customAvailabilityWindows.length
+    ? customAvailabilityWindows
+    : [await getDefaultWorkingHoursWindow()];
+  const fitsAvailabilityWindow = availabilityWindowsToCheck.some((window) => {
     const windowStart = getTimeMinutes(window.startTime);
     const windowEnd = getTimeMinutes(window.endTime);
 
@@ -418,6 +417,7 @@ function mapBookingRow(row: BookingRow): AdminBookingRequest {
 
   return {
     bookingDate: row.booking_date,
+    clientAvatarUrl: row.profiles?.avatar_url ?? null,
     clientEmail: row.contact_email ?? row.profiles?.email ?? 'No email provided',
     clientId: row.client_id,
     clientName: row.contact_name ?? row.profiles?.full_name ?? 'Client',
@@ -429,6 +429,7 @@ function mapBookingRow(row: BookingRow): AdminBookingRequest {
     id: row.id,
     notes: row.notes,
     packageInclusions: row.packages?.inclusions ?? [],
+    packageImageUrl: row.packages?.image_url ?? null,
     packageName: row.packages?.name ?? 'Package',
     packagePrice: Number(row.packages?.price ?? 0),
     peopleCount: row.people_count ?? notesDetails.peopleCount,

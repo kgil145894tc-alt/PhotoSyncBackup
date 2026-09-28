@@ -6,6 +6,7 @@ import { Animated, Easing, Pressable, ScrollView, Text, useWindowDimensions, Vie
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
+import { setStackSlideAnimation } from '@/navigation/tab-navigation';
 import { setSelectedPackage } from '@/services/booking-draft';
 import {
   getCachedPackagesForService,
@@ -91,9 +92,6 @@ export default function ServicePackagesScreen() {
           style={[styles.backButton, { left: x(20), top: y(39), width: px(35), height: px(35) }]}>
           <ChevronLeft size={px(26)} />
         </Pressable>
-        <Text style={[styles.category, { left: x(18), top: y(95), width: px(190), fontSize: px(11), lineHeight: px(16) }]}>
-          {(service?.category ?? serviceSlug.replace(/-/g, ' ')).toUpperCase()}
-        </Text>
         <Text
           numberOfLines={2}
           style={[styles.headline, { left: x(19), top: y(108), width: px(318), fontSize: px(heroTitleSize), lineHeight: px(36) }]}>
@@ -221,6 +219,7 @@ function PackageCard({
         accessibilityLabel={`Select ${item.name}`}
         onPress={() => {
           setSelectedPackage(item);
+          setStackSlideAnimation('slide_from_right');
           router.push('/book/selected');
         }}
         style={({ pressed }) => [

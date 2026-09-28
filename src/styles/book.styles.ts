@@ -66,26 +66,32 @@ export const bookStyles = StyleSheet.create({
     includeFontPadding: false,
   },
   inclusionCard: {
-    position: 'absolute',
     backgroundColor: '#ffffff',
+    position: 'absolute',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.15,
     shadowRadius: 4,
     elevation: 3,
   },
+  inclusionList: {
+    alignSelf: 'stretch',
+  },
   inclusionRow: {
-    position: 'absolute',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     flexDirection: 'row',
+  },
+  inclusionIconWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   inclusionText: {
     color: '#142C4C',
+    flex: 1,
     fontFamily: 'Inter',
     includeFontPadding: false,
   },
   note: {
-    position: 'absolute',
     color: '#142C4C',
     fontFamily: 'Inter',
     includeFontPadding: false,

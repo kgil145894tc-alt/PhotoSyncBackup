@@ -1,15 +1,11 @@
 import { supabase } from '@/lib/supabase';
 import { createAuditLog } from '@/services/audit-log';
 import { formatBookingTimeRange } from '@/services/admin-bookings';
+import { fallbackWorkingHoursWindow, getDefaultWorkingHoursWindow } from '@/services/studio-settings';
 import { type CalendarDaySummary, type CalendarGridDay, type CalendarSlotStatus, type CalendarTimeSlot } from '@/types/calendar';
 
-const defaultTimeSlots = [
-  { endTime: '17:00:00', startTime: '08:00:00' },
-];
 const fullDayUnavailableSlot = { endTime: '23:59:00', startTime: '00:00:00' };
 const clientSlotStepMinutes = 30;
-
-const defaultSlotKeys = new Set(defaultTimeSlots.map((slot) => getSlotKey(slot.startTime, slot.endTime)));
 
 type BookingSlotRow = {
   booking_date: string;
@@ -48,7 +44,7 @@ export async function getCalendarDaySummaries(monthPrefix = getCurrentDateString
       .lte('booking_date', endDate),
     supabase
       .from('time_slots')
-      .select('slot_date, status')
+      .select('slot_date, start_time, end_time, status')
       .gte('slot_date', startDate)
       .lte('slot_date', endDate),
   ]);
@@ -69,6 +65,10 @@ export async function getCalendarDaySummaries(monthPrefix = getCurrentDateString
 
     if (item.status === 'unavailable') {
       summary.hasUnavailable = true;
+
+      if (item.start_time === fullDayUnavailableSlot.startTime && item.end_time === fullDayUnavailableSlot.endTime) {
+        summary.hasFullDayUnavailable = true;
+      }
     }
   }
 
@@ -121,16 +121,17 @@ export async function getCalendarSlotsForDate(date: string): Promise<CalendarTim
     clientName: booking.profiles?.full_name ?? 'Client',
     endTime: booking.end_time,
     id: `booking-${booking.id}`,
-    isCustom: !defaultSlotKeys.has(getSlotKey(booking.start_time, booking.end_time)),
+    isCustom: true,
     isSaved: false,
     startTime: booking.start_time,
     status: 'booked' as const,
   }));
 
+  const defaultSlotKey = getSlotKeyFromWindow(await getDefaultWorkingHoursWindow());
   const adminSlots = ((adminRows ?? []) as AdminTimeSlotRow[]).map((slot) => ({
     endTime: slot.end_time,
     id: slot.id,
-    isCustom: !defaultSlotKeys.has(getSlotKey(slot.start_time, slot.end_time)),
+    isCustom: getSlotKey(slot.start_time, slot.end_time) !== defaultSlotKey,
     isSaved: true,
     reason: slot.reason,
     startTime: slot.start_time,
@@ -223,19 +224,42 @@ export async function saveCalendarSlot({
 
   const { data: bookedSlot, error: bookedSlotError } = await supabase
     .from('bookings')
-    .select('id')
+    .select('id, start_time, end_time')
     .eq('booking_date', date)
-    .eq('start_time', startTime)
-    .eq('end_time', endTime)
     .eq('status', 'confirmed')
-    .limit(1);
+    .limit(100);
 
   if (bookedSlotError) {
     return { message: bookedSlotError.message, success: false };
   }
 
-  if (bookedSlot?.length) {
-    return { message: 'This time slot already has a confirmed booking.', success: false };
+  const requestedInterval = getIntervalFromTimeRange(startTime, endTime);
+  const overlappingBooking = bookedSlot?.find((booking) =>
+    doIntervalsOverlap(requestedInterval, getIntervalFromTimeRange(booking.start_time as string, booking.end_time as string)),
+  );
+
+  if (overlappingBooking) {
+    return { message: 'This time slot overlaps with a confirmed booking.', success: false };
+  }
+
+  const overlappingSlot = await findOverlappingSavedTimeSlot({
+    date,
+    endTime,
+    ignoredSlotId: slotId,
+    startTime,
+  });
+
+  if (!overlappingSlot.success) {
+    return overlappingSlot;
+  }
+
+  if (overlappingSlot.slot) {
+    const conflictText = overlappingSlot.conflictType === 'duplicate' ? 'already exists' : 'overlaps with';
+
+    return {
+      message: `This time slot ${conflictText} ${formatBookingTimeRange(overlappingSlot.slot.startTime, overlappingSlot.slot.endTime)}.`,
+      success: false,
+    };
   }
 
   const payload = {
@@ -382,6 +406,25 @@ export async function markCalendarSlot({
     return { message: 'Supabase is not connected yet.', success: false };
   }
 
+  const overlappingSlot = await findOverlappingSavedTimeSlot({
+    date,
+    endTime,
+    startTime,
+  });
+
+  if (!overlappingSlot.success) {
+    return overlappingSlot;
+  }
+
+  if (overlappingSlot.slot) {
+    const conflictText = overlappingSlot.conflictType === 'duplicate' ? 'already exists' : 'overlaps with';
+
+    return {
+      message: `This time slot ${conflictText} ${formatBookingTimeRange(overlappingSlot.slot.startTime, overlappingSlot.slot.endTime)}.`,
+      success: false,
+    };
+  }
+
   const { error } = await supabase
     .from('time_slots')
     .upsert(
@@ -496,17 +539,19 @@ export function getMonthPrefix(date: Date | string) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function getDefaultSlots(savedSlots: CalendarTimeSlot[]) {
+async function getDefaultSlots(savedSlots: CalendarTimeSlot[]) {
   const slotsByTime = new Map<string, CalendarTimeSlot>();
+  const defaultWindow = supabase ? await getDefaultWorkingHoursWindow() : fallbackWorkingHoursWindow;
+  const hasCustomAvailableSlots = savedSlots.some((slot) => slot.status === 'available' && slot.isCustom);
 
-  for (const slot of defaultTimeSlots) {
-    const key = getSlotKey(slot.startTime, slot.endTime);
+  if (!hasCustomAvailableSlots) {
+    const key = getSlotKey(defaultWindow.startTime, defaultWindow.endTime);
     slotsByTime.set(key, {
-      endTime: slot.endTime,
+      endTime: defaultWindow.endTime,
       id: key,
       isCustom: false,
       isSaved: false,
-      startTime: slot.startTime,
+      startTime: defaultWindow.startTime,
       status: 'available',
     });
   }
@@ -525,6 +570,10 @@ function getDefaultSlots(savedSlots: CalendarTimeSlot[]) {
   return Array.from(slotsByTime.values()).sort((a, b) => a.startTime.localeCompare(b.startTime));
 }
 
+function getSlotKeyFromWindow(window: { endTime: string; startTime: string }) {
+  return getSlotKey(window.startTime, window.endTime);
+}
+
 function getOrCreateSummary(summaries: Map<string, CalendarDaySummary>, date: string) {
   const existing = summaries.get(date);
 
@@ -536,6 +585,7 @@ function getOrCreateSummary(summaries: Map<string, CalendarDaySummary>, date: st
     date,
     hasAvailable: false,
     hasBooked: false,
+    hasFullDayUnavailable: false,
     hasUnavailable: false,
   };
 
@@ -558,6 +608,101 @@ function isFullDayUnavailableSlot(slot: Pick<CalendarTimeSlot, 'endTime' | 'star
 
 function doIntervalsOverlap(first: { end: number; start: number }, second: { end: number; start: number }) {
   return first.start < second.end && second.start < first.end;
+}
+
+function getIntervalFromTimeRange(startTime: string, endTime: string) {
+  return {
+    end: getTimeMinutes(endTime),
+    start: getTimeMinutes(startTime),
+  };
+}
+
+async function findOverlappingSavedTimeSlot({
+  date,
+  endTime,
+  ignoredSlotId,
+  startTime,
+}: {
+  date: string;
+  endTime: string;
+  ignoredSlotId?: string;
+  startTime: string;
+}) {
+  if (!supabase) {
+    return { message: 'Supabase is not connected yet.', success: false as const };
+  }
+
+  const { data: savedSlots, error } = await supabase
+    .from('time_slots')
+    .select('id, start_time, end_time, status')
+    .eq('slot_date', date)
+    .limit(100);
+
+  if (error) {
+    return { message: error.message, success: false as const };
+  }
+
+  const requestedInterval = getIntervalFromTimeRange(startTime, endTime);
+  const defaultWindow = await getDefaultWorkingHoursWindow();
+  const duplicateSlot = savedSlots?.find((savedSlot) => {
+    if (savedSlot.id === ignoredSlotId) {
+      return false;
+    }
+
+    return savedSlot.start_time === startTime && savedSlot.end_time === endTime;
+  });
+
+  if (duplicateSlot) {
+    return {
+      conflictType: 'duplicate' as const,
+      slot: {
+        endTime: duplicateSlot.end_time as string,
+        startTime: duplicateSlot.start_time as string,
+      },
+      success: true as const,
+    };
+  }
+
+  const slot = savedSlots?.find((savedSlot) => {
+    if (savedSlot.id === ignoredSlotId) {
+      return false;
+    }
+
+    if (
+      savedSlot.status === 'available' &&
+      isDefaultWorkingHoursSlot({
+        endTime: savedSlot.end_time as string,
+        startTime: savedSlot.start_time as string,
+      }, defaultWindow)
+    ) {
+      return false;
+    }
+
+    return doIntervalsOverlap(
+      requestedInterval,
+      getIntervalFromTimeRange(savedSlot.start_time as string, savedSlot.end_time as string),
+    );
+  });
+
+  if (!slot) {
+    return { slot: null, success: true as const };
+  }
+
+  return {
+    conflictType: 'overlap' as const,
+    slot: {
+      endTime: slot.end_time as string,
+      startTime: slot.start_time as string,
+    },
+    success: true as const,
+  };
+}
+
+function isDefaultWorkingHoursSlot(
+  slot: { endTime: string; startTime: string },
+  defaultWindow: { endTime: string; startTime: string },
+) {
+  return slot.startTime === defaultWindow.startTime && slot.endTime === defaultWindow.endTime;
 }
 
 function getTimeMinutes(value: string) {

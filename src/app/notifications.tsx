@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
@@ -162,6 +162,8 @@ export default function ClientNotificationsScreen() {
 
         {isLoading ? (
           <Text style={styles.loadingText}>Checking notifications...</Text>
+        ) : groupedNotifications.length === 0 ? (
+          <Text style={styles.loadingText}>No notifications yet.</Text>
         ) : groupedNotifications.map((section) => (
           <View key={section.key} style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -179,10 +181,15 @@ export default function ClientNotificationsScreen() {
                     }
 
                     if (!notification.isRead) {
-                      await markNotificationRead(notification.id);
-                      setNotifications((current) =>
-                        current.map((item) => (item.id === notification.id ? { ...item, isRead: true } : item)),
-                      );
+                      const result = await markNotificationRead(notification.id);
+
+                      if (result.success) {
+                        setNotifications((current) =>
+                          current.map((item) => (item.id === notification.id ? { ...item, isRead: true } : item)),
+                        );
+                      } else {
+                        Alert.alert('Notification not updated', result.message ?? 'Please try again.');
+                      }
                     }
 
                     if (notification.bookingId) {
@@ -256,6 +263,7 @@ function toDisplayNotification(notification: PhotoSyncNotification): DisplayNoti
 function inferNotificationKind(notification: PhotoSyncNotification): NotificationKind {
   const text = `${notification.title} ${notification.message}`.toLowerCase();
 
+  if (text.includes('reminder')) return 'appointment';
   if (text.includes('approved') || text.includes('confirmed')) return 'approved';
   if (text.includes('appointment') || text.includes('schedule')) return 'appointment';
   if (text.includes('review') || text.includes('submitted')) return 'review';

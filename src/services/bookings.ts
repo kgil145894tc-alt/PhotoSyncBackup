@@ -3,6 +3,7 @@ import { emitBookingsChanged } from '@/services/booking-events';
 import { createBookingStatusHistory } from '@/services/booking-status-history';
 import { getBookingDraft } from '@/services/booking-draft';
 import { createAdminBookingSubmittedNotifications } from '@/services/notifications';
+import { getDefaultWorkingHoursWindow } from '@/services/studio-settings';
 
 type SubmitBookingResult = {
   message?: string;
@@ -20,10 +21,6 @@ type ServiceBookingRulesResult =
       message?: string;
       success: false;
     };
-
-const defaultAvailabilityWindows = [
-  { endTime: '17:00:00', startTime: '08:00:00' },
-];
 
 export async function submitBookingRequest(): Promise<SubmitBookingResult> {
   if (!supabase) {
@@ -272,14 +269,14 @@ async function checkSlotAvailability({
     end: selectedAppointment.end + bufferMinutes,
     start: Math.max(0, selectedAppointment.start - bufferMinutes),
   };
-  const availabilityWindows = [
-    ...defaultAvailabilityWindows,
-    ...(availableWindows ?? []).map((slot) => ({
-      endTime: slot.end_time as string,
-      startTime: slot.start_time as string,
-    })),
-  ];
-  const fitsAvailabilityWindow = availabilityWindows.some((window) => {
+  const customAvailabilityWindows = (availableWindows ?? []).map((slot) => ({
+    endTime: slot.end_time as string,
+    startTime: slot.start_time as string,
+  }));
+  const availabilityWindowsToCheck = customAvailabilityWindows.length
+    ? customAvailabilityWindows
+    : [await getDefaultWorkingHoursWindow()];
+  const fitsAvailabilityWindow = availabilityWindowsToCheck.some((window) => {
     const windowStart = getTimeMinutes(window.startTime);
     const windowEnd = getTimeMinutes(window.endTime);
 

@@ -1,19 +1,24 @@
 import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Alert, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
+import { LogoutConfirmationModal } from '@/components/logout-confirmation-modal';
 import { signOutPhotoSync } from '@/services/auth';
-import { getMyProfile, type UserProfile } from '@/services/profile';
+import { getMyProfile, updateMyProfile, uploadProfileAvatar, type UserProfile } from '@/services/profile';
 import { bottomNavMetrics } from '@/styles/navigation.styles';
 import { profileStyles as styles } from '@/styles/profile.styles';
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const [isLoading, setIsLoading] = useState(true);
+  const [isLogoutModalVisible, setIsLogoutModalVisible] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
 
   useFocusEffect(
@@ -37,10 +42,82 @@ export default function ProfileScreen() {
   const fullName = profile?.fullName || 'PhotoSync Client';
   const email = profile?.email || 'No email available';
 
+  async function handleConfirmLogout() {
+    if (isSigningOut) {
+      return;
+    }
+
+    setIsSigningOut(true);
+    await signOutPhotoSync();
+    setIsSigningOut(false);
+    setIsLogoutModalVisible(false);
+    router.replace('/');
+  }
+
+  async function handlePickAvatar() {
+    if (isUploadingAvatar || !profile) {
+      return;
+    }
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Please allow PhotoSync to choose images from your gallery.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      mediaTypes: ['images'],
+      quality: 0.85,
+    });
+
+    if (result.canceled || !result.assets[0]) {
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+
+    const selectedImage = result.assets[0];
+    const uploadResult = await uploadProfileAvatar({
+      fileName: selectedImage.fileName,
+      mimeType: selectedImage.mimeType,
+      uri: selectedImage.uri,
+    });
+
+    if (!uploadResult.success || !uploadResult.publicUrl) {
+      setIsUploadingAvatar(false);
+      Alert.alert('Photo not uploaded', uploadResult.message ?? 'Please check your Supabase Storage setup.');
+      return;
+    }
+
+    const saveResult = await updateMyProfile({
+      avatarUrl: uploadResult.publicUrl,
+      fullName: profile.fullName,
+      phone: profile.phone,
+      username: profile.username,
+    });
+
+    if (!saveResult.success) {
+      setIsUploadingAvatar(false);
+      Alert.alert('Profile photo not saved', saveResult.message ?? 'Please try again.');
+      return;
+    }
+
+    setProfile({ ...profile, avatarUrl: uploadResult.publicUrl });
+    setIsUploadingAvatar(false);
+  }
+
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
       <View style={[styles.compactHeader, { paddingTop: insets.top }]}>
+        <Image
+          contentFit="cover"
+          source={require('@/assets/images/admin-calendar-banner.png')}
+          style={styles.profileHeaderTexture}
+        />
         <BrandLogo />
       </View>
 
@@ -50,59 +127,62 @@ export default function ProfileScreen() {
           source={require('@/assets/images/booking-empty-background.png')}
           style={styles.profileBackgroundImage}
         />
-        <View style={styles.profileAvatarWrap}>
-          {profile?.avatarUrl ? (
-            <Image contentFit="cover" source={{ uri: profile.avatarUrl }} style={styles.profileAvatarImage} />
-          ) : (
-            <DefaultAvatar />
-          )}
-          <View style={styles.profileCameraBadge}>
-            <CameraIcon />
+        <View style={styles.profileContent}>
+          <Pressable
+            accessibilityLabel="Upload profile photo"
+            accessibilityRole="button"
+            disabled={isLoading || isUploadingAvatar}
+            onPress={handlePickAvatar}
+            style={({ pressed }) => [
+              styles.profileAvatarWrap,
+              (pressed || isUploadingAvatar) && { opacity: 0.82 },
+            ]}>
+            {profile?.avatarUrl ? (
+              <Image contentFit="cover" source={{ uri: profile.avatarUrl }} style={styles.profileAvatarImage} />
+            ) : (
+              <DefaultAvatar />
+            )}
+            <View style={styles.profileCameraBadge}>
+              <CameraIcon />
+            </View>
+          </Pressable>
+
+          <Text numberOfLines={1} style={styles.designProfileName}>{isLoading ? 'Loading...' : fullName}</Text>
+          <Text numberOfLines={2} style={styles.designProfileEmail}>{isUploadingAvatar ? 'Uploading photo...' : email}</Text>
+
+          <View style={styles.designActionStack}>
+            <Pressable
+              accessibilityLabel="Edit profile"
+              accessibilityRole="button"
+              onPress={() => router.push('/profile/edit' as never)}
+              style={({ pressed }) => [styles.profileMenuRow, pressed && { opacity: 0.84 }]}>
+              <View style={styles.profileMenuLeft}>
+                <UserIcon />
+                <Text style={styles.profileMenuText}>Edit Profile</Text>
+              </View>
+              <ChevronRight />
+            </Pressable>
           </View>
-        </View>
-
-        <Text numberOfLines={1} style={styles.designProfileName}>{isLoading ? 'Loading...' : fullName}</Text>
-        <Text numberOfLines={2} style={styles.designProfileEmail}>{email}</Text>
-
-        <View style={styles.designActionStack}>
-          <Pressable
-            accessibilityLabel="Edit profile"
-            accessibilityRole="button"
-            onPress={() => router.push('/profile/edit' as never)}
-            style={({ pressed }) => [styles.profileMenuRow, pressed && { opacity: 0.84 }]}>
-            <View style={styles.profileMenuLeft}>
-              <UserIcon />
-              <Text style={styles.profileMenuText}>Edit Profile</Text>
-            </View>
-            <ChevronRight />
-          </Pressable>
-
-          <Pressable
-            accessibilityLabel="Contact preferences"
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.profileMenuRow, pressed && { opacity: 0.84 }]}>
-            <View style={styles.profileMenuLeft}>
-              <BellIcon />
-              <Text style={styles.profileMenuText}>Contact Preferences</Text>
-            </View>
-            <ChevronRight />
-          </Pressable>
         </View>
 
         <View style={[styles.designLogoutWrap, { bottom: bottomNavMetrics.height + insets.bottom + 35 }]}>
           <Pressable
             accessibilityLabel="Log out"
             accessibilityRole="button"
-            onPress={async () => {
-              await signOutPhotoSync();
-              router.replace('/');
-            }}
+            onPress={() => setIsLogoutModalVisible(true)}
             style={({ pressed }) => [styles.designLogoutButton, pressed && { opacity: 0.82 }]}>
             <LogoutIcon />
             <Text style={styles.designLogoutText}>Logout</Text>
           </Pressable>
         </View>
       </View>
+
+      <LogoutConfirmationModal
+        isLoading={isSigningOut}
+        onCancel={() => setIsLogoutModalVisible(false)}
+        onConfirm={handleConfirmLogout}
+        visible={isLogoutModalVisible}
+      />
     </View>
   );
 }
@@ -127,10 +207,6 @@ function DefaultAvatar() {
 
 function UserIcon() {
   return <PathIcon path="M12 12C14.2 12 16 10.2 16 8C16 5.8 14.2 4 12 4C9.8 4 8 5.8 8 8C8 10.2 9.8 12 12 12ZM5 20C5.8 16.5 8.4 14.5 12 14.5C15.6 14.5 18.2 16.5 19 20" size={18} />;
-}
-
-function BellIcon() {
-  return <PathIcon path="M18 16V11C18 7.7 15.8 5 12 5C8.2 5 6 7.7 6 11V16L4.5 18H19.5L18 16ZM10 20H14" size={18} />;
 }
 
 function CameraIcon() {

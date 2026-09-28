@@ -12,11 +12,21 @@ import { subscribeToBookingsChanged } from '@/services/booking-events';
 import { setSelectedPackage } from '@/services/booking-draft';
 import { cancelClientBooking, getClientBookings, getClientReschedulePackage } from '@/services/client-bookings';
 import { bookingEmptyStyles as styles } from '@/styles/booking-empty.styles';
+import { clientUi } from '@/styles/client-ui.styles';
 import { bottomNavMetrics } from '@/styles/navigation.styles';
 import { type AdminBookingRequest, type BookingStatus } from '@/types/admin-bookings';
 
 const FIGMA_WIDTH = 412;
 const FIGMA_NAV_TOP = 844;
+const CLIENT_HEADER_HEIGHT = clientUi.metrics.headerHeight;
+const CLIENT_HEADER_UNDERLAY_HEIGHT = CLIENT_HEADER_HEIGHT + 29;
+const CLIENT_HEADER_TITLE_TOP = 57;
+const CLIENT_HEADER_TITLE_SIZE = clientUi.type.pageTitleSize;
+const CLIENT_HEADER_TITLE_LINE_HEIGHT = 34;
+const CLIENT_HEADER_BACK_TOP = 52;
+const CLIENT_PRIMARY_BUTTON_HEIGHT = clientUi.metrics.primaryButtonHeight;
+const CLIENT_PRIMARY_BUTTON_TEXT_SIZE = clientUi.type.buttonSize;
+const CLIENT_PRIMARY_BUTTON_LINE_HEIGHT = 22;
 type BookingFilter = 'all' | 'approved' | 'cancelled' | 'pending';
 
 const filters: BookingFilter[] = ['all', 'pending', 'approved', 'cancelled'];
@@ -200,20 +210,23 @@ function BookingListView({
   x: (value: number) => number;
   y: (value: number) => number;
 }) {
-  const listHeight = Math.max(1, contentHeight - y(130));
+  const listHeight = Math.max(1, contentHeight - y(CLIENT_HEADER_HEIGHT));
   const contentSize = bookings.length ? 88 + bookings.length * 120 + 120 : 650;
 
   return (
     <View style={[styles.canvas, { height: contentHeight }]}>
-      <View style={[styles.bookingHeader, { height: y(159), width }]} />
-      <Text style={[styles.bookingHeaderTitle, { left: x(118), top: y(67), width: px(176), fontSize: px(24), lineHeight: px(38) }]}>
+      <View style={[styles.bookingHeader, { height: y(CLIENT_HEADER_UNDERLAY_HEIGHT), width }]}>
+        <Image
+          contentFit="cover"
+          source={require('@/assets/images/admin-calendar-banner.png')}
+          style={styles.bookingHeaderTexture}
+        />
+      </View>
+      <Text style={[styles.bookingHeaderTitle, { left: x(108), top: y(CLIENT_HEADER_TITLE_TOP), width: px(196), fontSize: px(CLIENT_HEADER_TITLE_SIZE), lineHeight: px(CLIENT_HEADER_TITLE_LINE_HEIGHT) }]}>
         My Bookings
       </Text>
-      <Pressable accessibilityLabel="Back" accessibilityRole="button" onPress={() => router.back()} style={[styles.bookingBackButton, { left: x(28), top: y(59), width: px(35), height: px(35) }]}>
-        <ChevronLeft color="#ffffff" size={px(26)} />
-      </Pressable>
 
-      <View style={[styles.bookingBodyShell, { left: 0, top: y(130), width, height: listHeight + y(30), borderTopLeftRadius: px(20), borderTopRightRadius: px(20) }]}>
+      <View style={[styles.bookingBodyShell, { left: 0, top: y(CLIENT_HEADER_HEIGHT), width, height: listHeight + y(30), borderTopLeftRadius: px(20), borderTopRightRadius: px(20) }]}>
         <Image contentFit="cover" source={require('@/assets/images/booking-empty-background.png')} style={styles.bookingBodyBackground} />
       </View>
 
@@ -221,7 +234,7 @@ function BookingListView({
         bounces={false}
         contentContainerStyle={{ height: px(contentSize) }}
         showsVerticalScrollIndicator={false}
-        style={[styles.bookingListScroll, { left: 0, top: y(130), width, height: listHeight }]}>
+        style={[styles.bookingListScroll, { left: 0, top: y(CLIENT_HEADER_HEIGHT), width, height: listHeight }]}>
         <View style={[styles.bookingFilterRow, { left: x(19), top: y(35), width: px(376) }]}>
           {filters.map((filter) => {
             const isActive = filter === activeFilter;
@@ -341,16 +354,24 @@ function BookingDetailView({
 
   return (
     <View style={[styles.canvas, { height: contentHeight }]}>
-      <View style={[styles.bookingHeader, { height: y(159), width }]} />
-      <Text style={[styles.bookingHeaderTitle, { left: x(105), top: y(67), width: px(205), fontSize: px(24), lineHeight: px(38) }]}>
+      <View style={[styles.bookingHeader, { height: y(CLIENT_HEADER_UNDERLAY_HEIGHT), width }]}>
+        <Image
+          contentFit="cover"
+          source={require('@/assets/images/admin-calendar-banner.png')}
+          style={styles.bookingHeaderTexture}
+        />
+      </View>
+      <Text style={[styles.bookingHeaderTitle, { left: x(98), top: y(CLIENT_HEADER_TITLE_TOP), width: px(216), fontSize: px(CLIENT_HEADER_TITLE_SIZE), lineHeight: px(CLIENT_HEADER_TITLE_LINE_HEIGHT) }]}>
         Booking Details
       </Text>
-      <Pressable accessibilityLabel="Back to bookings" accessibilityRole="button" onPress={onBack} style={[styles.bookingBackButton, { left: x(28), top: y(59), width: px(35), height: px(35) }]}>
+      <Pressable accessibilityLabel="Back to bookings" accessibilityRole="button" onPress={onBack} style={[styles.bookingBackButton, { left: x(28), top: y(CLIENT_HEADER_BACK_TOP), width: px(35), height: px(35) }]}>
         <ChevronLeft color="#ffffff" size={px(26)} />
       </Pressable>
 
-      <Image contentFit="cover" source={getBookingImageSource(booking)} style={[styles.detailHeroImage, { left: 0, top: y(117), width, height: y(263) }]} />
-      <Image contentFit="cover" source={require('@/assets/images/booking-empty-background.png')} style={[styles.detailBackground, { left: 0, top: y(379), width, height: Math.max(1, contentHeight - y(379)) }]} />
+      <View style={[styles.bookingDetailBodyShell, { left: 0, top: y(CLIENT_HEADER_HEIGHT), width, height: Math.max(1, contentHeight - y(CLIENT_HEADER_HEIGHT) + y(30)), borderTopLeftRadius: px(28), borderTopRightRadius: px(28) }]}>
+        <Image contentFit="cover" source={getBookingImageSource(booking)} style={[styles.detailHeroImage, { left: 0, top: 0, width, height: y(263) }]} />
+        <Image contentFit="cover" source={require('@/assets/images/booking-empty-background.png')} style={[styles.bookingBodyBackground, { top: y(263), height: Math.max(1, contentHeight - y(CLIENT_HEADER_HEIGHT + 263) + y(30)) }]} />
+      </View>
 
       <View style={[styles.detailInfoCard, { left: x(33), top: y(362), width: px(348), minHeight: px(270), borderRadius: px(20) }]}>
         <View style={[styles.detailStatusPill, { backgroundColor: statusStyle.background }]}>
@@ -376,18 +397,18 @@ function BookingDetailView({
           accessibilityRole="button"
           disabled={isRescheduling}
           onPress={onCancel}
-          style={({ pressed }) => [styles.detailPrimaryButton, { left: x(33), top: y(786), width: px(348), height: px(64), borderRadius: px(20), opacity: pressed ? 0.84 : 1 }]}>
+          style={({ pressed }) => [styles.detailPrimaryButton, { left: x(33), top: y(786), width: px(348), height: px(CLIENT_PRIMARY_BUTTON_HEIGHT), borderRadius: px(28), opacity: pressed ? 0.84 : 1 }]}>
           <CancelCalendarIcon size={px(28)} />
-          <Text style={[styles.detailPrimaryButtonText, { fontSize: px(24), lineHeight: px(38) }]}>Cancel Request</Text>
+          <Text style={[styles.detailPrimaryButtonText, { fontSize: px(CLIENT_PRIMARY_BUTTON_TEXT_SIZE), lineHeight: px(CLIENT_PRIMARY_BUTTON_LINE_HEIGHT) }]}>Cancel Request</Text>
         </Pressable>
       ) : canReschedule ? (
         <Pressable
           accessibilityRole="button"
           disabled={isRescheduling}
           onPress={onReschedule}
-          style={({ pressed }) => [styles.detailPrimaryButton, { left: x(33), top: y(786), width: px(348), height: px(64), borderRadius: px(20), opacity: pressed || isRescheduling ? 0.84 : 1 }]}>
+          style={({ pressed }) => [styles.detailPrimaryButton, { left: x(33), top: y(786), width: px(348), height: px(CLIENT_PRIMARY_BUTTON_HEIGHT), borderRadius: px(28), opacity: pressed || isRescheduling ? 0.84 : 1 }]}>
           <CalendarIcon color="#ffffff" size={px(25)} />
-          <Text style={[styles.detailPrimaryButtonText, { fontSize: px(24), lineHeight: px(38) }]}>{isRescheduling ? 'Opening...' : 'Reschedule'}</Text>
+          <Text style={[styles.detailPrimaryButtonText, { fontSize: px(CLIENT_PRIMARY_BUTTON_TEXT_SIZE), lineHeight: px(CLIENT_PRIMARY_BUTTON_LINE_HEIGHT) }]}>{isRescheduling ? 'Opening...' : 'Reschedule'}</Text>
         </Pressable>
       ) : (
         <BrowseServicesButton onPress={() => router.push('/services')} px={px} top={786} x={x} />
@@ -476,9 +497,9 @@ function BrowseServicesButton({ onPress, px, top, x }: { onPress: () => void; px
       accessibilityLabel="Browse Services"
       accessibilityRole="button"
       onPress={onPress}
-      style={({ pressed }) => [styles.browseButton, { left: x(33), top: px(top), width: px(348), height: px(64), borderRadius: px(30), opacity: pressed ? 0.84 : 1 }]}>
+      style={({ pressed }) => [styles.browseButton, { left: x(33), top: px(top), width: px(348), height: px(CLIENT_PRIMARY_BUTTON_HEIGHT), borderRadius: px(28), opacity: pressed ? 0.84 : 1 }]}>
       <BrowseIcon size={px(22)} />
-      <Text style={[styles.browseText, { marginLeft: px(9), fontSize: px(20), lineHeight: px(38) }]}>Browse Services</Text>
+      <Text style={[styles.browseText, { marginLeft: px(9), fontSize: px(CLIENT_PRIMARY_BUTTON_TEXT_SIZE), lineHeight: px(CLIENT_PRIMARY_BUTTON_LINE_HEIGHT) }]}>Browse Services</Text>
     </Pressable>
   );
 }

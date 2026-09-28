@@ -4,6 +4,7 @@ import { expirePastPendingBookings } from '@/services/booking-expiration';
 import { emitBookingsChanged } from '@/services/booking-events';
 import { createBookingStatusHistory } from '@/services/booking-status-history';
 import { createAdminBookingCancelledNotifications, createAdminBookingRescheduledNotifications } from '@/services/notifications';
+import { getDefaultWorkingHoursWindow } from '@/services/studio-settings';
 import { type AdminBookingRequest, type BookingStatus } from '@/types/admin-bookings';
 import { type BookingSchedule } from '@/types/booking';
 import { type PackageCatalogItem } from '@/types/services';
@@ -76,10 +77,6 @@ type RescheduleBookingRow = {
     full_name: string | null;
   } | null;
 };
-
-const defaultAvailabilityWindows = [
-  { endTime: '17:00:00', startTime: '08:00:00' },
-];
 
 export async function getClientBookings(): Promise<AdminBookingRequest[]> {
   if (!supabase) {
@@ -489,8 +486,9 @@ async function checkRescheduleAvailability({
     end: selectedAppointment.end + bufferMinutes,
     start: Math.max(0, selectedAppointment.start - bufferMinutes),
   };
+  const defaultAvailabilityWindow = await getDefaultWorkingHoursWindow();
   const availabilityWindows = [
-    ...defaultAvailabilityWindows,
+    defaultAvailabilityWindow,
     ...(availableWindows ?? []).map((slot) => ({
       endTime: slot.end_time as string,
       startTime: slot.start_time as string,

@@ -227,14 +227,33 @@ export const serviceFormStyles = StyleSheet.create({
     gap: 10,
     marginBottom: 18,
   },
-  activeBox: {
-    backgroundColor: '#E45F62',
-    borderRadius: 9,
-    height: 18,
-    width: 18,
+  activeSwitchTrack: {
+    backgroundColor: '#D1DAEA',
+    borderColor: 'rgba(76, 94, 118, 0.28)',
+    borderRadius: 16,
+    borderWidth: 1,
+    height: 30,
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+    width: 54,
   },
-  activeBoxOn: {
-    backgroundColor: '#4FB69F',
+  activeSwitchTrackOn: {
+    backgroundColor: '#142C4C',
+    borderColor: '#142C4C',
+  },
+  activeSwitchThumb: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    height: 24,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    width: 24,
+    elevation: 2,
+  },
+  activeSwitchThumbOn: {
+    alignSelf: 'flex-end',
   },
   activeText: {
     color: '#142C4C',

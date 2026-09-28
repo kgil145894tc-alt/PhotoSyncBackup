@@ -1,0 +1,101 @@
+import { StyleSheet } from 'react-native';
+
+export const clientUi = {
+  colors: {
+    background: '#F3EEEE',
+    card: '#ffffff',
+    ink: '#142C4C',
+    muted: '#4C5E76',
+    navBlue: '#142C4C',
+  },
+  metrics: {
+    cardRadius: 10,
+    headerHeight: 130,
+    primaryButtonHeight: 56,
+    rowHeight: 58,
+  },
+  type: {
+    brandSize: 22,
+    buttonSize: 16,
+    pageTitleSize: 23,
+    rowSize: 15,
+  },
+} as const;
+
+export const clientUiStyles = StyleSheet.create({
+  brandHeader: {
+    alignItems: 'center',
+    backgroundColor: clientUi.colors.navBlue,
+    height: clientUi.metrics.headerHeight,
+    justifyContent: 'center',
+  },
+  brandRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  brandText: {
+    color: '#ffffff',
+    fontFamily: 'Jomolhari',
+    fontSize: clientUi.type.brandSize,
+    includeFontPadding: false,
+    lineHeight: 34,
+  },
+  brandLogo: {
+    height: 34,
+    marginLeft: 1,
+    width: 42,
+  },
+  menuCard: {
+    alignItems: 'center',
+    backgroundColor: clientUi.colors.card,
+    borderColor: 'rgba(76, 94, 118, 0.16)',
+    borderRadius: clientUi.metrics.cardRadius,
+    borderWidth: 1,
+    elevation: 3,
+    flexDirection: 'row',
+    height: clientUi.metrics.rowHeight,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+  },
+  menuCardLeft: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minWidth: 0,
+  },
+  menuCardText: {
+    color: clientUi.colors.ink,
+    flex: 1,
+    fontFamily: 'InterSemiBold',
+    fontSize: clientUi.type.rowSize,
+    includeFontPadding: false,
+    lineHeight: 20,
+  },
+  primaryButton: {
+    alignItems: 'center',
+    backgroundColor: clientUi.colors.ink,
+    borderRadius: 28,
+    elevation: 3,
+    flexDirection: 'row',
+    gap: 8,
+    height: clientUi.metrics.primaryButtonHeight,
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+  },
+  primaryButtonText: {
+    color: '#ffffff',
+    fontFamily: 'InterSemiBold',
+    fontSize: clientUi.type.buttonSize,
+    includeFontPadding: false,
+    lineHeight: 22,
+  },
+});

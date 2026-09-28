@@ -2,7 +2,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
@@ -56,10 +56,15 @@ export default function PhotographerNotificationsScreen() {
 
   async function handleNotificationPress(notification: PhotoSyncNotification) {
     if (!notification.isRead) {
-      await markNotificationRead(notification.id);
-      setNotifications((current) =>
-        current.map((item) => (item.id === notification.id ? { ...item, isRead: true } : item)),
-      );
+      const result = await markNotificationRead(notification.id);
+
+      if (result.success) {
+        setNotifications((current) =>
+          current.map((item) => (item.id === notification.id ? { ...item, isRead: true } : item)),
+        );
+      } else {
+        Alert.alert('Notification not updated', result.message ?? 'Please try again.');
+      }
     }
 
     if (notification.bookingId) {
@@ -155,6 +160,7 @@ function FilterChip({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityState={{ selected: active }}
       onPress={onPress}
       style={({ pressed }) => [
         styles.adminNotificationsFilterChip,
@@ -184,9 +190,8 @@ function NotificationCard({
 
   return (
     <Pressable
-      accessibilityHint={isActionable ? 'Opens the booking request detail.' : undefined}
-      accessibilityRole={isActionable ? 'button' : undefined}
-      disabled={!isActionable}
+      accessibilityHint={isActionable ? 'Marks the notification read and opens the booking request detail.' : 'Marks the notification read.'}
+      accessibilityRole="button"
       onPress={onPress}
       style={({ pressed }) => [styles.adminNotificationItemCard, pressed && { opacity: 0.82 }]}>
       <View
@@ -291,6 +296,10 @@ function groupNotifications(items: PhotoSyncNotification[]): NotificationGroup[]
 
 function inferNotificationKind(notification: PhotoSyncNotification): NotificationKind {
   const text = `${notification.title} ${notification.message}`.toLowerCase();
+
+  if (text.includes('reminder')) {
+    return 'appointment';
+  }
 
   if (text.includes('cancel')) {
     return 'cancellation';

@@ -19,6 +19,11 @@ import { bottomNavMetrics } from '@/styles/navigation.styles';
 import { photographerStyles as styles } from '@/styles/photographer.styles';
 import { type CalendarTimeSlot } from '@/types/calendar';
 
+type TimeSlotNotice = {
+  message: string;
+  title: string;
+};
+
 export default function PhotographerCalendarSlotsScreen() {
   const insets = useSafeAreaInsets();
   const { date } = useLocalSearchParams<{ date?: string }>();
@@ -26,9 +31,12 @@ export default function PhotographerCalendarSlotsScreen() {
   const [editingSlot, setEditingSlot] = useState<CalendarTimeSlot | null>(null);
   const [endTimeInput, setEndTimeInput] = useState('');
   const [isManageModalVisible, setIsManageModalVisible] = useState(false);
+  const [isDeletingSlot, setIsDeletingSlot] = useState(false);
   const [isSlotModalVisible, setIsSlotModalVisible] = useState(false);
+  const [pendingDeleteSlot, setPendingDeleteSlot] = useState<CalendarTimeSlot | null>(null);
   const [selectedSlots, setSelectedSlots] = useState<CalendarTimeSlot[]>([]);
   const [startTimeInput, setStartTimeInput] = useState('');
+  const [timeSlotNotice, setTimeSlotNotice] = useState<TimeSlotNotice | null>(null);
   const bottomPadding = bottomNavMetrics.height + insets.bottom + 24;
   const isSelectedDayClosed = selectedSlots.some(isFullDayUnavailableSlot);
   const visibleSlots = useMemo(
@@ -89,25 +97,29 @@ export default function PhotographerCalendarSlotsScreen() {
     setEditingSlot(null);
     setStartTimeInput('');
     setEndTimeInput('');
-    setIsManageModalVisible(false);
     setIsSlotModalVisible(true);
   }
 
   function openEditSlotModal(slot: CalendarTimeSlot) {
     if (slot.status === 'booked') {
-      Alert.alert('Booked slot', 'Confirmed bookings cannot be edited here.');
+      setTimeSlotNotice({
+        message: 'Confirmed bookings cannot be edited here.',
+        title: 'Booked slot',
+      });
       return;
     }
 
     if (!slot.isCustom || !slot.isSaved) {
-      Alert.alert('Default available time', 'Default available times can only be marked available or unavailable.');
+      setTimeSlotNotice({
+        message: 'Default available times can only be marked available or unavailable.',
+        title: 'Default available time',
+      });
       return;
     }
 
     setEditingSlot(slot);
     setStartTimeInput(formatEditableTime(slot.startTime));
     setEndTimeInput(formatEditableTime(slot.endTime));
-    setIsManageModalVisible(false);
     setIsSlotModalVisible(true);
   }
 
@@ -116,12 +128,18 @@ export default function PhotographerCalendarSlotsScreen() {
     const parsedEnd = parseTimeInput(endTimeInput);
 
     if (!parsedStart || !parsedEnd) {
-      Alert.alert('Check time format', 'Please enter times like 8:00 AM, 1:30 PM, or 18:00.');
+      setTimeSlotNotice({
+        message: 'Please enter times like 8:00 AM, 1:30 PM, or 18:00.',
+        title: 'Check time format',
+      });
       return;
     }
 
     if (parsedStart >= parsedEnd) {
-      Alert.alert('Check time range', 'End time must be later than start time.');
+      setTimeSlotNotice({
+        message: 'End time must be later than start time.',
+        title: 'Check time range',
+      });
       return;
     }
 
@@ -134,7 +152,10 @@ export default function PhotographerCalendarSlotsScreen() {
     });
 
     if (!result.success) {
-      Alert.alert('Slot not saved', result.message ?? 'Please try again.');
+      setTimeSlotNotice({
+        message: result.message ?? 'Please try again.',
+        title: 'Slot not saved',
+      });
       return;
     }
 
@@ -145,24 +166,41 @@ export default function PhotographerCalendarSlotsScreen() {
     await refreshSlots();
   }
 
-  async function deleteSlot(slot: CalendarTimeSlot) {
+  function openDeleteSlotModal(slot: CalendarTimeSlot) {
     if (slot.status === 'booked') {
-      Alert.alert('Booked slot', 'Confirmed booking slots cannot be deleted.');
+      setTimeSlotNotice({
+        message: 'Confirmed booking slots cannot be deleted.',
+        title: 'Booked slot',
+      });
       return;
     }
 
     if (!slot.isCustom || !slot.isSaved) {
-      Alert.alert('Default available time', 'Default available times cannot be deleted. Mark them unavailable instead.');
+      setTimeSlotNotice({
+        message: 'Default available times cannot be deleted. Mark them unavailable instead.',
+        title: 'Default available time',
+      });
       return;
     }
 
-    const result = await deleteCalendarSlot(slot.id);
+    setPendingDeleteSlot(slot);
+  }
+
+  async function deletePendingSlot() {
+    if (!pendingDeleteSlot || isDeletingSlot) {
+      return;
+    }
+
+    setIsDeletingSlot(true);
+    const result = await deleteCalendarSlot(pendingDeleteSlot.id);
+    setIsDeletingSlot(false);
 
     if (!result.success) {
       Alert.alert('Slot not deleted', result.message ?? 'Please try again.');
       return;
     }
 
+    setPendingDeleteSlot(null);
     await refreshSlots();
   }
 
@@ -266,7 +304,16 @@ export default function PhotographerCalendarSlotsScreen() {
         </View>
       </ScrollView>
 
-      <Modal animationType="fade" onRequestClose={() => setIsManageModalVisible(false)} transparent visible={isManageModalVisible}>
+      <Modal
+        animationType="fade"
+        onRequestClose={() => {
+          setIsManageModalVisible(false);
+          setIsSlotModalVisible(false);
+          setPendingDeleteSlot(null);
+          setTimeSlotNotice(null);
+        }}
+        transparent
+        visible={isManageModalVisible}>
         <View style={styles.manageDateScreen}>
           <StatusBar style="dark" />
           <Image
@@ -283,7 +330,12 @@ export default function PhotographerCalendarSlotsScreen() {
                 accessibilityLabel="Close manage date"
                 accessibilityRole="button"
                 hitSlop={12}
-                onPress={() => setIsManageModalVisible(false)}
+                onPress={() => {
+                  setIsManageModalVisible(false);
+                  setIsSlotModalVisible(false);
+                  setPendingDeleteSlot(null);
+                  setTimeSlotNotice(null);
+                }}
                 style={({ pressed }) => [styles.manageDateBackButton, pressed && { opacity: 0.72 }]}>
                 <BackIcon />
               </Pressable>
@@ -338,7 +390,7 @@ export default function PhotographerCalendarSlotsScreen() {
                         <Pressable accessibilityLabel="Edit time slot" accessibilityRole="button" hitSlop={8} onPress={() => openEditSlotModal(slot)}>
                           <SmallPencilIcon />
                         </Pressable>
-                        <Pressable accessibilityLabel="Delete time slot" accessibilityRole="button" hitSlop={8} onPress={() => deleteSlot(slot)}>
+                        <Pressable accessibilityLabel="Delete time slot" accessibilityRole="button" hitSlop={8} onPress={() => openDeleteSlotModal(slot)}>
                           <DeleteIcon />
                         </Pressable>
                       </View>
@@ -354,62 +406,128 @@ export default function PhotographerCalendarSlotsScreen() {
 
               <Pressable
                 accessibilityRole="button"
-                onPress={() => setIsManageModalVisible(false)}
+                onPress={() => {
+                  setIsManageModalVisible(false);
+                  setIsSlotModalVisible(false);
+                  setPendingDeleteSlot(null);
+                  setTimeSlotNotice(null);
+                }}
                 style={({ pressed }) => [styles.manageSaveButton, pressed && { opacity: 0.86 }]}>
                 <Text style={styles.manageSaveText}>Save</Text>
               </Pressable>
             </View>
           </ScrollView>
-        </View>
-      </Modal>
 
-      <Modal animationType="fade" onRequestClose={() => setIsSlotModalVisible(false)} transparent visible={isSlotModalVisible}>
-        <View style={styles.timeEntryOverlay}>
-          <View style={styles.timeEntryCard}>
-            <View style={styles.timeEntryHeader}>
-              <Text style={styles.timeEntryTitle}>{editingSlot ? 'Edit Time Slot' : 'Add Time Slot'}</Text>
-              <Pressable
-                accessibilityLabel="Close time slot form"
-                accessibilityRole="button"
-                hitSlop={10}
-                onPress={() => setIsSlotModalVisible(false)}
-                style={({ pressed }) => [styles.timeEntryCloseButton, pressed && { opacity: 0.72 }]}>
-                <CloseIcon />
-              </Pressable>
-            </View>
-            <View style={styles.timeEntryFields}>
-              <View style={styles.timeEntryField}>
-                <Text style={[styles.formLabel, styles.timeEntryLabel]}>Start Time</Text>
-                <TextInput
-                  accessibilityLabel="Start time"
-                  onChangeText={setStartTimeInput}
-                  placeholder="8:00 AM"
-                  placeholderTextColor="#8AA3C3"
-                  style={styles.calendarSlotInput}
-                  value={startTimeInput}
-                />
+          {isSlotModalVisible ? (
+            <View style={styles.timeEntryOverlay}>
+              <View style={styles.timeEntryCard}>
+                <View style={styles.timeEntryHeader}>
+                  <Text style={styles.timeEntryTitle}>{editingSlot ? 'Edit Time Slot' : 'Add Time Slot'}</Text>
+                  <Pressable
+                    accessibilityLabel="Close time slot form"
+                    accessibilityRole="button"
+                    hitSlop={10}
+                    onPress={() => setIsSlotModalVisible(false)}
+                    style={({ pressed }) => [styles.timeEntryCloseButton, pressed && { opacity: 0.72 }]}>
+                    <CloseIcon />
+                  </Pressable>
+                </View>
+                <View style={styles.timeEntryFields}>
+                  <View style={styles.timeEntryField}>
+                    <Text style={[styles.formLabel, styles.timeEntryLabel]}>Start Time</Text>
+                    <TextInput
+                      accessibilityLabel="Start time"
+                      onChangeText={setStartTimeInput}
+                      placeholder="8:00 AM"
+                      placeholderTextColor="#8AA3C3"
+                      style={styles.calendarSlotInput}
+                      value={startTimeInput}
+                    />
+                  </View>
+                  <View style={styles.timeEntryField}>
+                    <Text style={[styles.formLabel, styles.timeEntryLabel]}>End Time</Text>
+                    <TextInput
+                      accessibilityLabel="End time"
+                      onChangeText={setEndTimeInput}
+                      placeholder="10:00 AM"
+                      placeholderTextColor="#8AA3C3"
+                      style={styles.calendarSlotInput}
+                      value={endTimeInput}
+                    />
+                  </View>
+                </View>
+                <View style={styles.timeEntryActions}>
+                  <Pressable accessibilityRole="button" onPress={() => setIsSlotModalVisible(false)} style={styles.timeEntryCancelButton}>
+                    <Text style={styles.timeEntryCancelText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="button" onPress={saveSlotFromModal} style={styles.timeEntrySubmitButton}>
+                    <Text style={styles.timeEntrySubmitText}>{editingSlot ? 'Update' : 'Add'}</Text>
+                  </Pressable>
+                </View>
               </View>
-              <View style={styles.timeEntryField}>
-                <Text style={[styles.formLabel, styles.timeEntryLabel]}>End Time</Text>
-                <TextInput
-                  accessibilityLabel="End time"
-                  onChangeText={setEndTimeInput}
-                  placeholder="10:00 AM"
-                  placeholderTextColor="#8AA3C3"
-                  style={styles.calendarSlotInput}
-                  value={endTimeInput}
-                />
+            </View>
+          ) : null}
+
+          {pendingDeleteSlot ? (
+            <View style={styles.deleteTimeSlotOverlay}>
+              <View style={styles.deleteTimeSlotCard}>
+                <Pressable
+                  accessibilityLabel="Close delete time slot confirmation"
+                  accessibilityRole="button"
+                  disabled={isDeletingSlot}
+                  hitSlop={10}
+                  onPress={() => setPendingDeleteSlot(null)}
+                  style={({ pressed }) => [styles.deleteTimeSlotCloseButton, pressed && !isDeletingSlot && { opacity: 0.72 }]}>
+                  <CloseIcon />
+                </Pressable>
+                <DeleteTimeSlotIcon />
+                <Text style={styles.deleteTimeSlotTitle}>Delete this time slot?</Text>
+                <Text style={styles.deleteTimeSlotMessage}>This action cannot be undone.</Text>
+                <View style={styles.deleteTimeSlotActions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={isDeletingSlot}
+                    onPress={() => setPendingDeleteSlot(null)}
+                    style={({ pressed }) => [styles.deleteTimeSlotCancelButton, pressed && !isDeletingSlot && { opacity: 0.82 }]}>
+                    <Text style={styles.deleteTimeSlotCancelText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={isDeletingSlot}
+                    onPress={deletePendingSlot}
+                    style={({ pressed }) => [styles.deleteTimeSlotDeleteButton, pressed && !isDeletingSlot && { opacity: 0.82 }]}>
+                    <Text style={styles.deleteTimeSlotDeleteText}>{isDeletingSlot ? 'Deleting' : 'Delete'}</Text>
+                  </Pressable>
+                </View>
               </View>
             </View>
-            <View style={styles.timeEntryActions}>
-              <Pressable accessibilityRole="button" onPress={() => setIsSlotModalVisible(false)} style={styles.timeEntryCancelButton}>
-                <Text style={styles.timeEntryCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable accessibilityRole="button" onPress={saveSlotFromModal} style={styles.timeEntrySubmitButton}>
-                <Text style={styles.timeEntrySubmitText}>{editingSlot ? 'Update' : 'Add'}</Text>
-              </Pressable>
+          ) : null}
+
+          {timeSlotNotice ? (
+            <View style={styles.deleteTimeSlotOverlay}>
+              <View style={styles.deleteTimeSlotCard}>
+                <Pressable
+                  accessibilityLabel="Close time slot notice"
+                  accessibilityRole="button"
+                  hitSlop={10}
+                  onPress={() => setTimeSlotNotice(null)}
+                  style={({ pressed }) => [styles.deleteTimeSlotCloseButton, pressed && { opacity: 0.72 }]}>
+                  <CloseIcon />
+                </Pressable>
+                <TimeSlotNoticeIcon />
+                <Text style={styles.deleteTimeSlotTitle}>{timeSlotNotice.title}</Text>
+                <Text style={styles.deleteTimeSlotMessage}>{timeSlotNotice.message}</Text>
+                <View style={styles.deleteTimeSlotActions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setTimeSlotNotice(null)}
+                    style={({ pressed }) => [styles.timeSlotNoticeOkButton, pressed && { opacity: 0.82 }]}>
+                    <Text style={styles.timeSlotNoticeOkText}>OK</Text>
+                  </Pressable>
+                </View>
+              </View>
             </View>
-          </View>
+          ) : null}
         </View>
       </Modal>
     </View>
@@ -641,6 +759,28 @@ function DeleteIcon() {
       <Path d="M7 7.8H23" stroke="#D71920" strokeLinecap="round" strokeWidth={2.6} />
       <Path d="M12.3 7.8V5.8C12.3 4.8 13.1 4 14.1 4H15.9C16.9 4 17.7 4.8 17.7 5.8V7.8" stroke="#D71920" strokeLinecap="round" strokeWidth={2.6} />
       <Path d="M13.1 13.6V22M16.9 13.6V22" stroke="#ffffff" strokeLinecap="round" strokeWidth={1.9} />
+    </Svg>
+  );
+}
+
+function DeleteTimeSlotIcon() {
+  return (
+    <Svg width={100} height={100} viewBox="0 0 100 100" fill="none">
+      <Circle cx={50} cy={50} r={50} fill="#F5E1E3" />
+      <Path d="M36 41H64L61.8 72.5C61.6 74.4 60 76 58 76H42C40 76 38.4 74.4 38.2 72.5L36 41Z" fill="#C92228" />
+      <Path d="M32 35H68" stroke="#C92228" strokeLinecap="round" strokeWidth={5} />
+      <Path d="M44 35V30.5C44 28.5 45.6 27 47.6 27H52.4C54.4 27 56 28.5 56 30.5V35" stroke="#C92228" strokeLinecap="round" strokeWidth={5} />
+      <Path d="M46 47V68M54 47V68" stroke="#ffffff" strokeLinecap="round" strokeWidth={3.8} />
+    </Svg>
+  );
+}
+
+function TimeSlotNoticeIcon() {
+  return (
+    <Svg width={100} height={100} viewBox="0 0 100 100" fill="none">
+      <Circle cx={50} cy={50} r={50} fill="#E5EEF9" />
+      <Path d="M50 28V56" stroke="#142C4C" strokeLinecap="round" strokeWidth={7} />
+      <Circle cx={50} cy={70} r={4.5} fill="#142C4C" />
     </Svg>
   );
 }

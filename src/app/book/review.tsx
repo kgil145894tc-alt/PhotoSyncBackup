@@ -6,6 +6,7 @@ import { Alert, Pressable, ScrollView, Text, useWindowDimensions, View } from 'r
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
+import { BookingStepIndicator } from '@/components/booking-step-indicator';
 import { clearBookingDraft, getBookingDraft, getSelectedPackage } from '@/services/booking-draft';
 import { submitBookingRequest } from '@/services/bookings';
 import { bookingReviewStyles as styles } from '@/styles/booking-review.styles';
@@ -193,27 +194,7 @@ function StepIndicator({
   x: (value: number) => number;
   y: (value: number) => number;
 }) {
-  return (
-    <>
-      <View style={[styles.stepLine, { left: x(135), top: y(130), width: px(156), height: px(2) }]} />
-      {[1, 2, 3].map((step, index) => (
-        <View
-          key={step}
-          style={[
-            styles.stepCircle,
-            {
-              left: x(109 + index * 91),
-              top: y(118),
-              width: px(26),
-              height: px(26),
-              borderRadius: px(13),
-            },
-          ]}>
-          <Text style={[styles.stepText, { fontSize: px(15.6), lineHeight: px(20) }]}>{step}</Text>
-        </View>
-      ))}
-    </>
-  );
+  return <BookingStepIndicator currentStep={3} previousStep={2} px={px} x={x} y={y} />;
 }
 
 function ReviewRow({

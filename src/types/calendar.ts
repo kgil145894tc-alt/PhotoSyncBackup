@@ -16,6 +16,7 @@ export type CalendarDaySummary = {
   date: string;
   hasAvailable: boolean;
   hasBooked: boolean;
+  hasFullDayUnavailable: boolean;
   hasUnavailable: boolean;
 };
 

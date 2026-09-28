@@ -6,6 +6,7 @@ import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
+import { AdminBrandHeader } from '@/components/admin-brand-header';
 import { formatShortBookingDate, getAdminBookingRequests } from '@/services/admin-bookings';
 import { subscribeToBookingsChanged } from '@/services/booking-events';
 import { bottomNavMetrics } from '@/styles/navigation.styles';
@@ -13,6 +14,7 @@ import { photographerStyles as styles } from '@/styles/photographer.styles';
 import { type AdminBookingRequest, type BookingStatus } from '@/types/admin-bookings';
 
 const filterOptions: ('all' | BookingStatus)[] = ['all', 'pending', 'confirmed', 'rejected'];
+const dateFilterOptions: DateFilter[] = ['all', 'today', 'tomorrow', 'thisWeek', 'upcoming'];
 const requestThumbs = [
   require('@/assets/images/admin-request-thumb-1.png'),
   require('@/assets/images/admin-request-thumb-2.png'),
@@ -21,9 +23,12 @@ const requestThumbs = [
   require('@/assets/images/admin-request-thumb-5.png'),
 ];
 
+type DateFilter = 'all' | 'today' | 'tomorrow' | 'thisWeek' | 'upcoming';
+
 export default function PhotographerRequestsScreen() {
   const insets = useSafeAreaInsets();
   const [activeFilter, setActiveFilter] = useState<'all' | BookingStatus>('pending');
+  const [activeDateFilter, setActiveDateFilter] = useState<DateFilter>('all');
   const [requests, setRequests] = useState<AdminBookingRequest[]>([]);
   const [searchText, setSearchText] = useState('');
   const bottomPadding = bottomNavMetrics.height + insets.bottom + 24;
@@ -31,6 +36,7 @@ export default function PhotographerRequestsScreen() {
     () =>
       requests.filter((request) => {
         const matchesFilter = activeFilter === 'all' || request.status === activeFilter;
+        const matchesDateFilter = isRequestInDateFilter(request.bookingDate, activeDateFilter);
         const searchValue = searchText.trim().toLowerCase();
         const matchesSearch =
           !searchValue ||
@@ -39,9 +45,9 @@ export default function PhotographerRequestsScreen() {
           request.packageName.toLowerCase().includes(searchValue) ||
           formatShortBookingDate(request.bookingDate).toLowerCase().includes(searchValue);
 
-        return matchesFilter && matchesSearch;
+        return matchesFilter && matchesDateFilter && matchesSearch;
       }),
-    [activeFilter, requests, searchText],
+    [activeDateFilter, activeFilter, requests, searchText],
   );
   const loadRequests = useCallback(async (isMounted: () => boolean = () => true) => {
     const items = await getAdminBookingRequests();
@@ -74,25 +80,11 @@ export default function PhotographerRequestsScreen() {
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      <ScrollView
-        bounces={false}
-        contentContainerStyle={[styles.adminRequestsScreenContent, { paddingBottom: bottomPadding }]}
-        showsVerticalScrollIndicator={false}>
-        <View style={[styles.adminRequestsHeroHeader, { paddingTop: insets.top }]}>
-          <Image
-            contentFit="cover"
-            source={require('@/assets/images/admin-requests-header-camera.png')}
-            style={styles.adminRequestsHeaderCamera}
-          />
-          <View style={styles.adminRequestsHeaderBrand}>
-            <Text style={styles.adminRequestsHeaderBrandText}>PhotoSync</Text>
-            <Image
-              contentFit="contain"
-              source={require('@/assets/images/admin-calendar-logo.png')}
-              style={styles.adminRequestsHeaderLogo}
-            />
-          </View>
-        </View>
+      <View style={styles.adminRequestsScreenContent}>
+        <AdminBrandHeader
+          textureSource={require('@/assets/images/admin-calendar-banner.png')}
+          topInset={insets.top}
+        />
 
         <View style={styles.adminRequestsPanel}>
           <Image
@@ -139,14 +131,54 @@ export default function PhotographerRequestsScreen() {
               />
             </View>
             <Pressable
-              accessibilityLabel="Filter requests"
+              accessibilityLabel={`Filter by date: ${formatDateFilterLabel(activeDateFilter)}`}
               accessibilityRole="button"
-              style={({ pressed }) => [styles.adminRequestsFilterButton, pressed && { opacity: 0.82 }]}>
-              <FilterIcon />
+              onPress={() => setActiveDateFilter(getNextDateFilter(activeDateFilter))}
+              style={({ pressed }) => [
+                styles.adminRequestsFilterButton,
+                activeDateFilter !== 'all' && styles.activeAdminRequestsDateFilterButton,
+                pressed && { opacity: 0.82 },
+              ]}>
+              <FilterIcon active={activeDateFilter !== 'all'} />
             </Pressable>
           </View>
 
-          <View style={styles.adminRequestsList}>
+          <ScrollView
+            bounces={false}
+            contentContainerStyle={styles.adminRequestsDateFilterRow}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.adminRequestsDateFilterScroller}>
+            {dateFilterOptions.map((filter) => {
+              const isActive = activeDateFilter === filter;
+
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  key={filter}
+                  onPress={() => setActiveDateFilter(filter)}
+                  style={({ pressed }) => [
+                    styles.adminRequestsDateFilterPill,
+                    isActive && styles.activeAdminRequestsDateFilterPill,
+                    pressed && { opacity: 0.82 },
+                  ]}>
+                  <Text
+                    style={[
+                      styles.adminRequestsDateFilterText,
+                      isActive && styles.activeAdminRequestsDateFilterText,
+                    ]}>
+                    {formatDateFilterLabel(filter)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          <ScrollView
+            bounces={false}
+            contentContainerStyle={[styles.adminRequestsList, { paddingBottom: bottomPadding }]}
+            showsVerticalScrollIndicator={false}
+            style={styles.adminRequestsListScroller}>
             {filteredRequests.length === 0 && (
               <Text style={styles.adminRequestsEmptyText}>No booking requests found.</Text>
             )}
@@ -174,9 +206,9 @@ export default function PhotographerRequestsScreen() {
                 <ChevronRight />
               </Pressable>
             ))}
-          </View>
+          </ScrollView>
         </View>
-      </ScrollView>
+      </View>
     </View>
   );
 }
@@ -219,6 +251,73 @@ function formatFilterLabel(status: 'all' | BookingStatus) {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
+function formatDateFilterLabel(filter: DateFilter) {
+  switch (filter) {
+    case 'today':
+      return 'Today';
+    case 'tomorrow':
+      return 'Tomorrow';
+    case 'thisWeek':
+      return 'This week';
+    case 'upcoming':
+      return 'Upcoming';
+    default:
+      return 'All dates';
+  }
+}
+
+function getNextDateFilter(currentFilter: DateFilter) {
+  const currentIndex = dateFilterOptions.indexOf(currentFilter);
+  return dateFilterOptions[(currentIndex + 1) % dateFilterOptions.length];
+}
+
+function isRequestInDateFilter(bookingDate: string, filter: DateFilter) {
+  if (filter === 'all') return true;
+
+  const today = getDateKey(new Date());
+
+  if (filter === 'today') {
+    return bookingDate === today;
+  }
+
+  if (filter === 'tomorrow') {
+    return bookingDate === getOffsetDateKey(1);
+  }
+
+  if (filter === 'upcoming') {
+    return bookingDate >= today;
+  }
+
+  const { endOfWeek, startOfWeek } = getCurrentWeekRange();
+  return bookingDate >= startOfWeek && bookingDate <= endOfWeek;
+}
+
+function getCurrentWeekRange() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+
+  return {
+    endOfWeek: getDateKey(end),
+    startOfWeek: getDateKey(start),
+  };
+}
+
+function getOffsetDateKey(daysFromToday: number) {
+  const now = new Date();
+  const target = new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysFromToday);
+
+  return getDateKey(target);
+}
+
+function getDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
 function SearchIcon() {
   return (
     <Svg width={22} height={22} viewBox="0 0 22 22" fill="none">
@@ -228,10 +327,15 @@ function SearchIcon() {
   );
 }
 
-function FilterIcon() {
+function FilterIcon({ active = false }: { active?: boolean }) {
   return (
     <Svg width={25} height={25} viewBox="0 0 25 25" fill="none">
-      <Path d="M5 7H20M8 12.5H17M10.5 18H14.5" stroke="#8AA3C3" strokeLinecap="round" strokeWidth={2} />
+      <Path
+        d="M5 7H20M8 12.5H17M10.5 18H14.5"
+        stroke={active ? '#ffffff' : '#8AA3C3'}
+        strokeLinecap="round"
+        strokeWidth={2}
+      />
     </Svg>
   );
 }

@@ -12,6 +12,12 @@ type NotificationRow = {
   user_id: string;
 };
 
+type AdminNotificationValues = {
+  bookingId: string;
+  message: string;
+  title: string;
+};
+
 export async function createAdminBookingSubmittedNotifications({
   bookingId,
   clientName,
@@ -21,19 +27,11 @@ export async function createAdminBookingSubmittedNotifications({
   clientName: string;
   packageName: string;
 }) {
-  if (!supabase) return;
-
-  const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'admin');
-  const notifications = (admins ?? []).map((admin) => ({
+  await createAdminBookingNotifications({
     booking_id: bookingId,
     message: `${clientName} submitted a ${packageName} booking request.`,
     title: 'New booking request',
-    user_id: admin.id,
-  }));
-
-  if (notifications.length) {
-    await supabase.from('notifications').insert(notifications);
-  }
+  });
 }
 
 export async function createAdminBookingCancelledNotifications({
@@ -45,19 +43,11 @@ export async function createAdminBookingCancelledNotifications({
   clientName: string;
   packageName: string;
 }) {
-  if (!supabase) return;
-
-  const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'admin');
-  const notifications = (admins ?? []).map((admin) => ({
+  await createAdminBookingNotifications({
     booking_id: bookingId,
     message: `${clientName} cancelled a ${packageName} booking.`,
     title: 'Booking cancelled',
-    user_id: admin.id,
-  }));
-
-  if (notifications.length) {
-    await supabase.from('notifications').insert(notifications);
-  }
+  });
 }
 
 export async function createAdminBookingRescheduledNotifications({
@@ -69,13 +59,53 @@ export async function createAdminBookingRescheduledNotifications({
   clientName: string;
   packageName: string;
 }) {
+  await createAdminBookingNotifications({
+    booking_id: bookingId,
+    message: `${clientName} requested a new schedule for a ${packageName} booking.`,
+    title: 'Booking rescheduled',
+  });
+}
+
+async function createAdminBookingNotifications({
+  booking_id: bookingId,
+  message,
+  title,
+}: {
+  booking_id: string;
+  message: string;
+  title: string;
+}) {
+  if (!supabase) return;
+
+  const { error } = await supabase.rpc('create_admin_booking_notification', {
+    p_booking_id: bookingId,
+    p_message: message,
+    p_title: title,
+  });
+
+  if (!error) {
+    return;
+  }
+
+  await createAdminBookingNotificationsFallback({
+    bookingId,
+    message,
+    title,
+  });
+}
+
+async function createAdminBookingNotificationsFallback({
+  bookingId,
+  message,
+  title,
+}: AdminNotificationValues) {
   if (!supabase) return;
 
   const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'admin');
   const notifications = (admins ?? []).map((admin) => ({
     booking_id: bookingId,
-    message: `${clientName} requested a new schedule for a ${packageName} booking.`,
-    title: 'Booking rescheduled',
+    message,
+    title,
     user_id: admin.id,
   }));
 
@@ -220,6 +250,8 @@ export async function getMyNotifications(limit = 10): Promise<PhotoSyncNotificat
     return [];
   }
 
+  await ensureBookingReminderNotifications();
+
   const { data: userData } = await supabase.auth.getUser();
 
   if (!userData.user) {
@@ -248,6 +280,40 @@ export async function getMyNotifications(limit = 10): Promise<PhotoSyncNotificat
   }));
 }
 
+export async function getMyUnreadNotificationCount() {
+  if (!supabase) {
+    return 0;
+  }
+
+  await ensureBookingReminderNotifications();
+
+  const { data: userData } = await supabase.auth.getUser();
+
+  if (!userData.user) {
+    return 0;
+  }
+
+  const { count, error } = await supabase
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userData.user.id)
+    .eq('is_read', false);
+
+  if (error) {
+    return 0;
+  }
+
+  return count ?? 0;
+}
+
+export async function ensureBookingReminderNotifications() {
+  if (!supabase) {
+    return;
+  }
+
+  await supabase.rpc('ensure_booking_reminder_notifications');
+}
+
 export async function markNotificationRead(id: string) {
   if (!supabase) {
     return { message: 'Supabase is not connected yet.', success: false };
@@ -259,14 +325,28 @@ export async function markNotificationRead(id: string) {
     return { message: 'Please login first.', success: false };
   }
 
-  const { error } = await supabase
+  const { data: rpcUpdated, error: rpcError } = await supabase.rpc('mark_my_notification_read', {
+    p_notification_id: id,
+  });
+
+  if (!rpcError) {
+    return rpcUpdated ? { success: true } : { message: 'Notification was not found for this account.', success: false };
+  }
+
+  const { data, error } = await supabase
     .from('notifications')
     .update({ is_read: true })
     .eq('id', id)
-    .eq('user_id', userData.user.id);
+    .eq('user_id', userData.user.id)
+    .select('id')
+    .maybeSingle();
 
   if (error) {
     return { message: error.message, success: false };
+  }
+
+  if (!data) {
+    return { message: 'Notification was not found for this account.', success: false };
   }
 
   return { success: true };

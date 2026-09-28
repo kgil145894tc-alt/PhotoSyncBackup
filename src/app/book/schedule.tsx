@@ -1,17 +1,19 @@
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
+import { BookingStepIndicator } from '@/components/booking-step-indicator';
 import { getSelectedPackage, setBookingSchedule } from '@/services/booking-draft';
 import { rescheduleClientBooking } from '@/services/client-bookings';
 import {
   addMonthsToMonthPrefix,
   buildCalendarGridDays,
   formatCalendarMonthLabel,
+  getCalendarDaySummaries,
   getClientBookableSlotsForDate,
   formatSlotTimeRange,
   getClampedDateInMonth,
@@ -19,11 +21,10 @@ import {
   getMonthPrefix,
 } from '@/services/calendar';
 import { bookingScheduleStyles as styles } from '@/styles/booking-schedule.styles';
-import { type CalendarTimeSlot } from '@/types/calendar';
+import { type CalendarDaySummary, type CalendarTimeSlot } from '@/types/calendar';
 
 const FIGMA_WIDTH = 412;
 const FIGMA_NAV_TOP = 844;
-const selectedStep = 1;
 
 const weekDays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const todayDate = getCurrentDateString();
@@ -40,10 +41,20 @@ export default function BookingScheduleScreen() {
   const minimumNoticeDays = selectedPackage.minimumNoticeDays ?? 1;
   const earliestBookableDate = addDaysToDateString(todayDate, Math.max(1, minimumNoticeDays));
   const [calendarMonth, setCalendarMonth] = useState(getMonthPrefix(earliestBookableDate));
+  const [daySummaries, setDaySummaries] = useState<CalendarDaySummary[]>([]);
   const [selectedDate, setSelectedDate] = useState(earliestBookableDate);
   const [selectedSlot, setSelectedSlot] = useState<CalendarTimeSlot | null>(null);
   const [timeSlots, setTimeSlots] = useState<CalendarTimeSlot[]>([]);
   const calendarDays = buildCalendarGridDays(calendarMonth, true);
+  const summariesByDate = useMemo(() => {
+    const map = new Map<string, CalendarDaySummary>();
+
+    for (const summary of daySummaries) {
+      map.set(summary.date, summary);
+    }
+
+    return map;
+  }, [daySummaries]);
   const calendarRowCount = calendarDays.length / 7;
   const dayCellSize = calendarRowCount > 5 ? 34 : 40;
   const dayCellStep = calendarRowCount > 5 ? 33 : 41;
@@ -87,8 +98,10 @@ export default function BookingScheduleScreen() {
     const preferredDay = Number(selectedDate.slice(-2));
     const clampedDate = getClampedDateInMonth(nextMonth, preferredDay);
     const nextSelectedDate = clampedDate < earliestBookableDate ? earliestBookableDate : clampedDate;
+    const summaries = await getCalendarDaySummaries(nextMonth);
 
     setCalendarMonth(nextMonth);
+    setDaySummaries(summaries);
     setSelectedDate(nextSelectedDate);
     await loadSlots(nextSelectedDate);
   }
@@ -96,12 +109,16 @@ export default function BookingScheduleScreen() {
   useEffect(() => {
     let isMounted = true;
 
-    getClientBookableSlotsForDate({
-      bufferMinutes,
-      date: earliestBookableDate,
-      durationMinutes: requiredDurationMinutes,
-    }).then((slots) => {
+    Promise.all([
+      getCalendarDaySummaries(calendarMonth),
+      getClientBookableSlotsForDate({
+        bufferMinutes,
+        date: earliestBookableDate,
+        durationMinutes: requiredDurationMinutes,
+      }),
+    ]).then(([summaries, slots]) => {
       if (isMounted) {
+        setDaySummaries(summaries);
         setTimeSlots(slots);
         setSelectedSlot(slots.find((slot) => isClientSelectableSlot(slot, requiredDurationMinutes)) ?? null);
       }
@@ -110,7 +127,7 @@ export default function BookingScheduleScreen() {
     return () => {
       isMounted = false;
     };
-  }, [bufferMinutes, earliestBookableDate, requiredDurationMinutes]);
+  }, [bufferMinutes, calendarMonth, earliestBookableDate, requiredDurationMinutes]);
 
   return (
     <View style={styles.container}>
@@ -196,7 +213,9 @@ export default function BookingScheduleScreen() {
               const row = Math.floor(index / 7);
               const column = index % 7;
               const isTooSoon = day.date < earliestBookableDate;
-              const isDisabled = !day.isCurrentMonth || isTooSoon;
+              const daySummary = day.isCurrentMonth ? summariesByDate.get(day.date) : undefined;
+              const isFullDayUnavailable = Boolean(daySummary?.hasFullDayUnavailable);
+              const isDisabled = !day.isCurrentMonth || isTooSoon || isFullDayUnavailable;
               const date = day.date;
               const isSelected = !isDisabled && date === selectedDate;
 
@@ -225,6 +244,7 @@ export default function BookingScheduleScreen() {
                     style={[
                       styles.dayText,
                       isDisabled && styles.disabledDayText,
+                      day.isCurrentMonth && isFullDayUnavailable && styles.unavailableDayText,
                       { fontSize: px(calendarRowCount > 5 ? 14 : 16), lineHeight: px(22) },
                   ]}>
                     {day.day}
@@ -407,7 +427,7 @@ function formatClientSlotStatus(slot: CalendarTimeSlot, requiredDurationMinutes:
     return `Needs ${formatDurationLabel(requiredDurationMinutes)}`;
   }
 
-  return slot.isCustom ? 'Available custom slot' : 'Available';
+  return 'Available';
 }
 
 function isClientSelectableSlot(slot: CalendarTimeSlot, requiredDurationMinutes: number) {
@@ -496,42 +516,7 @@ function StepIndicator({
   x: (value: number) => number;
   y: (value: number) => number;
 }) {
-  return (
-    <>
-      <View style={[styles.stepLine, { left: x(135), top: y(130), width: px(156), height: px(2) }]} />
-      {[1, 2, 3].map((step, index) => {
-        const active = step === selectedStep;
-
-        return (
-          <View
-            key={step}
-            style={[
-              styles.stepCircle,
-              {
-                left: x(109 + index * 91),
-                top: y(118),
-                width: px(26),
-                height: px(26),
-                borderRadius: px(13),
-                backgroundColor: active ? '#142C4C' : '#D1E2F7',
-              },
-            ]}>
-            <Text
-              style={[
-                styles.stepText,
-                {
-                  color: active ? '#ffffff' : '#142C4C',
-                  fontSize: px(15.6),
-                  lineHeight: px(20),
-                },
-              ]}>
-              {step}
-            </Text>
-          </View>
-        );
-      })}
-    </>
-  );
+  return <BookingStepIndicator currentStep={1} px={px} x={x} y={y} />;
 }
 
 function SelectPill({

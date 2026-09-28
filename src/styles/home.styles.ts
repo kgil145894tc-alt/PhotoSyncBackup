@@ -28,13 +28,19 @@ export const homeStyles = StyleSheet.create({
     backgroundColor: 'transparent',
     justifyContent: 'center',
   },
-  notificationDot: {
+  notificationBadge: {
     position: 'absolute',
-    right: 5,
-    top: 4,
+    alignItems: 'center',
     backgroundColor: '#ED2314',
     borderColor: '#ffffff',
     borderWidth: 1,
+    justifyContent: 'center',
+  },
+  notificationBadgeText: {
+    color: '#ffffff',
+    fontFamily: 'InterBold',
+    includeFontPadding: false,
+    textAlign: 'center',
   },
   cameraIcon: {
     position: 'absolute',

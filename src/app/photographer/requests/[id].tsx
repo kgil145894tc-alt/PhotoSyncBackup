@@ -6,6 +6,7 @@ import { Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from 'reac
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
+import { AdminBrandHeader } from '@/components/admin-brand-header';
 import {
   formatStatusLabel,
   getAdditionalNotes,
@@ -90,34 +91,24 @@ export default function PhotographerRequestDetailScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, styles.adminCurvedHeaderScreen]}>
       <StatusBar style="light" />
+      <AdminBrandHeader
+        onBack={() => router.back()}
+        textureSource={require('@/assets/images/admin-calendar-banner.png')}
+        topInset={insets.top}
+      />
       <ScrollView
         bounces={false}
-        contentContainerStyle={[styles.adminBookingDetailContent, { paddingBottom: bottomPadding }]}
+        contentContainerStyle={[styles.adminBookingDetailPanel, { paddingBottom: bottomPadding }]}
+        style={styles.adminBookingDetailScroller}
         showsVerticalScrollIndicator={false}>
-        <View style={[styles.adminBookingDetailHeader, { paddingTop: insets.top }]}>
-          <Image contentFit="cover" source={require('@/assets/images/admin-booking-detail-camera.png')} style={styles.adminBookingDetailHeaderCamera} />
-          <Pressable
-            accessibilityLabel="Back"
-            accessibilityRole="button"
-            onPress={() => router.back()}
-            style={({ pressed }) => [styles.adminBookingDetailBackButton, pressed && { opacity: 0.78 }]}>
-            <BackIcon />
-          </Pressable>
-          <View style={styles.adminBookingDetailBrand}>
-            <Text style={styles.adminBookingDetailBrandText}>PhotoSync</Text>
-            <Image contentFit="contain" source={require('@/assets/images/admin-calendar-logo.png')} style={styles.adminBookingDetailBrandLogo} />
-          </View>
-        </View>
+        <Image contentFit="cover" source={require('@/assets/images/admin-booking-detail-background.png')} style={styles.adminBookingDetailBackground} />
 
-        <View style={styles.adminBookingDetailPanel}>
-          <Image contentFit="cover" source={require('@/assets/images/admin-booking-detail-background.png')} style={styles.adminBookingDetailBackground} />
+        {!booking && <Text style={styles.adminBookingDetailLoading}>Loading booking request...</Text>}
 
-          {!booking && <Text style={styles.adminBookingDetailLoading}>Loading booking request...</Text>}
-
-          {booking && (
-            <>
+        {booking && (
+          <>
               <View style={[styles.adminBookingDetailStatusPill, getStatusPillStyle(booking.status)]}>
                 <StatusIcon status={booking.status} />
                 <Text style={[styles.adminBookingDetailStatusText, getStatusTextStyle(booking.status)]}>
@@ -126,7 +117,11 @@ export default function PhotographerRequestDetailScreen() {
               </View>
 
               <View style={styles.adminBookingDetailClientBlock}>
-                <Image contentFit="contain" source={require('@/assets/images/admin-booking-detail-avatar.png')} style={styles.adminBookingDetailAvatar} />
+                <Image
+                  contentFit="cover"
+                  source={booking.clientAvatarUrl ? { uri: booking.clientAvatarUrl } : require('@/assets/images/admin-booking-detail-avatar.png')}
+                  style={styles.adminBookingDetailAvatar}
+                />
                 <View style={styles.adminBookingDetailClientCopy}>
                   <Text numberOfLines={1} style={styles.adminBookingDetailClientName}>{booking.clientName}</Text>
                   <View style={styles.adminBookingDetailContactRow}>
@@ -227,9 +222,8 @@ export default function PhotographerRequestDetailScreen() {
               ) : (
                 <ResolvedRequestPanel booking={booking} />
               )}
-            </>
-          )}
-        </View>
+          </>
+        )}
       </ScrollView>
 
       <Modal animationType="fade" onRequestClose={() => setIsRejectModalVisible(false)} transparent visible={isRejectModalVisible}>
@@ -376,14 +370,6 @@ function StatusIcon({ status }: { status: BookingStatus }) {
   if (status === 'completed' || status === 'confirmed') return <CheckCircleIcon />;
   if (status === 'expired' || status === 'rejected' || status === 'cancelled') return <RejectSmallIcon />;
   return <PendingClockIcon />;
-}
-
-function BackIcon() {
-  return (
-    <Svg width={35} height={35} viewBox="0 0 35 35" fill="none">
-      <Path d="M21.5 8.5L12.5 17.5L21.5 26.5" stroke="#ffffff" strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} />
-    </Svg>
-  );
 }
 
 function PendingClockIcon() {

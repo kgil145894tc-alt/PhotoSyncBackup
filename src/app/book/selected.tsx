@@ -20,7 +20,6 @@ export default function BookScreen() {
   const inclusions = selectedPackage.inclusions.slice(0, 6).map((label, index) => ({
     icon: inclusionIcons[index] ?? 'copy',
     label,
-    top: 506 + index * 34,
   }));
   const bottomPadding = insets.bottom;
   const availableContentHeight = Math.max(1, height - bottomPadding);
@@ -83,18 +82,23 @@ export default function BookScreen() {
             Your moment, your story.
           </Text>
 
-          <View style={[styles.inclusionCard, { left: x(33), top: y(484), width: px(346), height: px(218), borderRadius: px(10) }]} />
-          {inclusions.map((item) => (
-            <View key={item.label} style={[styles.inclusionRow, { left: x(67), top: y(item.top), height: px(24) }]}>
-              <InclusionIcon name={item.icon} size={px(21)} />
-              <Text style={[styles.inclusionText, { marginLeft: px(28), fontSize: px(16), lineHeight: px(24) }]}>
-                {item.label}
-              </Text>
+          <View style={[styles.inclusionCard, { left: x(33), top: y(484), width: px(346), minHeight: px(218), borderRadius: px(10), paddingHorizontal: px(28), paddingTop: px(21), paddingBottom: px(16) }]}>
+            <View style={[styles.inclusionList, { gap: px(10) }]}>
+              {inclusions.map((item) => (
+                <View key={item.label} style={styles.inclusionRow}>
+                  <View style={[styles.inclusionIconWrap, { width: px(21), marginRight: px(21) }]}>
+                    <InclusionIcon name={item.icon} size={px(21)} />
+                  </View>
+                  <Text style={[styles.inclusionText, { fontSize: px(16), lineHeight: px(21) }]}>
+                    {item.label}
+                  </Text>
+                </View>
+              ))}
             </View>
-          ))}
-          <Text style={[styles.note, { left: x(51), top: y(650), width: px(315), fontSize: px(15), lineHeight: px(18) }]}>
-            Inclusions may vary. You can discuss{'\n'}custom requests after booking.
-          </Text>
+            <Text style={[styles.note, { fontSize: px(14), lineHeight: px(18), marginTop: px(14) }]}>
+              Inclusions may vary. You can discuss custom requests after booking.
+            </Text>
+          </View>
 
           <Text style={[styles.price, { left: x(37), top: y(712), width: px(133), fontSize: px(32), lineHeight: px(38) }]}>
             {selectedPackage.price}
