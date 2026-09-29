@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { getActiveBookingSlotsForDate } from '@/services/booking-availability';
 import { emitBookingsChanged } from '@/services/booking-events';
 import { createBookingStatusHistory } from '@/services/booking-status-history';
 import { getBookingDraft } from '@/services/booking-draft';
@@ -225,16 +226,11 @@ async function checkSlotAvailability({
   }
 
   const [
-    { data: existingBookings, error: bookingsError },
+    existingBookings,
     { data: unavailableSlots, error: unavailableSlotsError },
     { data: availableWindows, error: availableWindowsError },
   ] = await Promise.all([
-    supabase
-      .from('bookings')
-      .select('id, start_time, end_time')
-      .eq('booking_date', bookingDate)
-      .in('status', ['pending', 'confirmed'])
-      .limit(100),
+    getActiveBookingSlotsForDate(bookingDate),
     supabase
       .from('time_slots')
       .select('id, start_time, end_time')
@@ -249,8 +245,8 @@ async function checkSlotAvailability({
       .limit(100),
   ]);
 
-  if (bookingsError) {
-    return { message: `We could not check if the selected time is still available: ${bookingsError.message}`, success: false };
+  if (!existingBookings.success) {
+    return { message: `We could not check if the selected time is still available: ${existingBookings.message}`, success: false };
   }
 
   if (unavailableSlotsError) {
@@ -290,7 +286,7 @@ async function checkSlotAvailability({
     };
   }
 
-  const hasBookingConflict = existingBookings?.some((booking) =>
+  const hasBookingConflict = existingBookings.slots.some((booking) =>
     doIntervalsOverlap(selectedInterval, {
       end: getTimeMinutes(booking.end_time as string),
       start: getTimeMinutes(booking.start_time as string),

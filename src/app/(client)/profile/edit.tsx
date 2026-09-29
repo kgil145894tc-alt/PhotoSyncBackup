@@ -3,10 +3,11 @@ import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useState, type ReactNode } from 'react';
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
+import { showAppAlert } from '@/components/app-alert';
 import { getMyProfile, updateMyPassword, updateMyProfile, uploadProfileAvatar } from '@/services/profile';
 import { profileStyles as styles } from '@/styles/profile.styles';
 
@@ -48,7 +49,7 @@ export default function EditProfileScreen() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
-      Alert.alert('Permission needed', 'Please allow PhotoSync to choose images from your gallery.');
+      showAppAlert('Permission needed', 'Please allow PhotoSync to choose images from your gallery.');
       return;
     }
 
@@ -66,23 +67,23 @@ export default function EditProfileScreen() {
 
   async function handleSave() {
     if (!fullName.trim()) {
-      Alert.alert('Missing name', 'Please enter your full name.');
+      showAppAlert('Missing name', 'Please enter your full name.');
       return;
     }
 
     if (!username.trim()) {
-      Alert.alert('Missing username', 'Please enter your username.');
+      showAppAlert('Missing username', 'Please enter your username.');
       return;
     }
 
     if (newPassword || confirmPassword) {
       if (newPassword.length < 6) {
-        Alert.alert('Password too short', 'New password must be at least 6 characters.');
+        showAppAlert('Password too short', 'New password must be at least 6 characters.');
         return;
       }
 
       if (newPassword !== confirmPassword) {
-        Alert.alert('Passwords do not match', 'Please confirm your new password.');
+        showAppAlert('Passwords do not match', 'Please confirm your new password.');
         return;
       }
     }
@@ -99,7 +100,7 @@ export default function EditProfileScreen() {
 
       if (!uploadResult.success) {
         setIsSaving(false);
-        Alert.alert('Photo not uploaded', uploadResult.message ?? 'Please check your Supabase Storage setup.');
+        showAppAlert('Photo not uploaded', uploadResult.message ?? 'Please check your Supabase Storage setup.');
         return;
       }
 
@@ -115,7 +116,7 @@ export default function EditProfileScreen() {
 
     if (!result.success) {
       setIsSaving(false);
-      Alert.alert('Profile not saved', result.message ?? 'Please try again.');
+      showAppAlert('Profile not saved', result.message ?? 'Please try again.');
       return;
     }
 
@@ -124,13 +125,13 @@ export default function EditProfileScreen() {
 
       if (!passwordResult.success) {
         setIsSaving(false);
-        Alert.alert('Password not saved', passwordResult.message ?? 'Please try again.');
+        showAppAlert('Password not saved', passwordResult.message ?? 'Please try again.');
         return;
       }
     }
 
     setIsSaving(false);
-    Alert.alert('Profile saved', 'Your profile has been updated.');
+    showAppAlert('Profile saved', 'Your profile has been updated.');
     router.back();
   }
 

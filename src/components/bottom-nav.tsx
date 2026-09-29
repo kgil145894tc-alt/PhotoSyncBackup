@@ -6,7 +6,6 @@ import Svg, { Path } from 'react-native-svg';
 import {
   getTabItems,
   getTabRouteIndex,
-  setStackSlideAnimation,
   TabIconName,
 } from '@/navigation/tab-navigation';
 import { bottomNavMetrics, bottomNavStyles as styles, navColors } from '@/styles/navigation.styles';
@@ -39,9 +38,6 @@ export function BottomNav() {
               key={item.route}
               onPress={() => {
                 if (!isActive) {
-                  setStackSlideAnimation(
-                    targetIndex < currentIndex ? 'slide_from_left' : 'slide_from_right',
-                  );
                   router.push(item.route as never);
                 }
               }}

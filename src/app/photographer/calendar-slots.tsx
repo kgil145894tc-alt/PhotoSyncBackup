@@ -2,10 +2,11 @@ import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
+import { showAppAlert } from '@/components/app-alert';
 import { subscribeToBookingsChanged } from '@/services/booking-events';
 import {
   deleteCalendarSlot,
@@ -86,7 +87,7 @@ export default function PhotographerCalendarSlotsScreen() {
       : await reopenCalendarDay(selectedDate);
 
     if (!result.success) {
-      Alert.alert(status === 'unavailable' ? 'Day not closed' : 'Day not reopened', result.message ?? 'Please try again.');
+      showAppAlert(status === 'unavailable' ? 'Day not closed' : 'Day not reopened', result.message ?? 'Please try again.');
       return;
     }
 
@@ -196,7 +197,7 @@ export default function PhotographerCalendarSlotsScreen() {
     setIsDeletingSlot(false);
 
     if (!result.success) {
-      Alert.alert('Slot not deleted', result.message ?? 'Please try again.');
+      showAppAlert('Slot not deleted', result.message ?? 'Please try again.');
       return;
     }
 

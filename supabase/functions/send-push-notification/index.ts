@@ -13,7 +13,7 @@ type NotificationRow = {
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-photosync-webhook-secret',
   'Access-Control-Allow-Origin': '*',
 };
 
@@ -28,9 +28,14 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  const webhookSecret = Deno.env.get('PUSH_WEBHOOK_SECRET');
 
   if (!supabaseUrl || !serviceRoleKey) {
     return json({ error: 'Supabase environment is not configured.' }, 500);
+  }
+
+  if (webhookSecret && req.headers.get('x-photosync-webhook-secret') !== webhookSecret) {
+    return json({ error: 'Unauthorized' }, 401);
   }
 
   const body = await req.json().catch(() => null);

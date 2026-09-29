@@ -401,10 +401,37 @@ export async function setServiceActive(id: string, isActive: boolean) {
     return { message: 'Supabase is not connected yet.', success: false };
   }
 
-  const { error } = await supabase.from('services').update({ is_active: isActive }).eq('id', id);
+  if (!isActive) {
+    const { count, error: bookingCountError } = await supabase
+      .from('bookings')
+      .select('id', { count: 'exact', head: true })
+      .eq('service_id', id);
+
+    if (bookingCountError) {
+      return { message: bookingCountError.message, success: false };
+    }
+
+    if ((count ?? 0) > 0) {
+      return {
+        message: 'This service has existing bookings and cannot be deleted.',
+        success: false,
+      };
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('services')
+    .update({ is_active: isActive })
+    .eq('id', id)
+    .select('id')
+    .maybeSingle();
 
   if (error) {
     return { message: error.message, success: false };
+  }
+
+  if (!data) {
+    return { message: 'No service was updated. Please refresh and try again.', success: false };
   }
 
   await createAuditLog({
@@ -427,10 +454,37 @@ export async function setPackageActive(id: string, isActive: boolean) {
     return { message: 'Supabase is not connected yet.', success: false };
   }
 
-  const { error } = await supabase.from('packages').update({ is_active: isActive }).eq('id', id);
+  if (!isActive) {
+    const { count, error: bookingCountError } = await supabase
+      .from('bookings')
+      .select('id', { count: 'exact', head: true })
+      .eq('package_id', id);
+
+    if (bookingCountError) {
+      return { message: bookingCountError.message, success: false };
+    }
+
+    if ((count ?? 0) > 0) {
+      return {
+        message: 'This package has existing bookings and cannot be deleted.',
+        success: false,
+      };
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('packages')
+    .update({ is_active: isActive })
+    .eq('id', id)
+    .select('id')
+    .maybeSingle();
 
   if (error) {
     return { message: error.message, success: false };
+  }
+
+  if (!data) {
+    return { message: 'No package was updated. Please refresh and try again.', success: false };
   }
 
   await createAuditLog({
@@ -448,13 +502,16 @@ export async function setPackageActive(id: string, isActive: boolean) {
 function mapServiceRow(row: ServiceRow, index: number, packageRows: { service_id: string }[]): ServiceCatalogItem {
   const slug = row.slug ?? 'portrait-photography';
   const fallback = getFallbackServiceBySlug(slug) ?? fallbackServices[index] ?? fallbackServices[0];
+  const description = row.description ?? fallback.description;
 
   return {
     ...fallback,
     basePrice: Number(row.price ?? fallback.basePrice),
     bufferMinutes: row.buffer_minutes ?? fallback.bufferMinutes,
-    cardDescription: fallback.cardDescription,
-    description: row.description ?? fallback.description,
+    cardDescription: formatServiceCardDescription(description),
+    cardTitle: row.name,
+    category: row.name.toUpperCase(),
+    description,
     durationMinutes: row.duration_minutes ?? fallback.durationMinutes,
     id: row.id,
     image: row.image_url ? { uri: row.image_url } : fallback.image,
@@ -468,6 +525,39 @@ function mapServiceRow(row: ServiceRow, index: number, packageRows: { service_id
   };
 }
 
+function formatServiceCardDescription(description: string) {
+  const normalizedDescription = description.trim().replace(/\s+/g, ' ');
+
+  if (normalizedDescription.length <= 26) {
+    return normalizedDescription;
+  }
+
+  const words = normalizedDescription.split(' ');
+  const lines: string[] = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    const nextLine = currentLine ? `${currentLine} ${word}` : word;
+
+    if (nextLine.length > 26 && currentLine) {
+      lines.push(currentLine);
+      currentLine = word;
+    } else {
+      currentLine = nextLine;
+    }
+
+    if (lines.length === 2) {
+      break;
+    }
+  }
+
+  if (currentLine && lines.length < 2) {
+    lines.push(currentLine);
+  }
+
+  return lines.join('\n');
+}
+
 function mapPackageRow(
   row: PackageRow,
   index: number,
@@ -476,7 +566,7 @@ function mapPackageRow(
   minimumNoticeDays?: number | null,
 ): PackageCatalogItem {
   const fallback = fallbackPortraitPackages[index] ?? fallbackPortraitPackages[0];
-  const inclusions = row.inclusions?.length ? row.inclusions : fallback.inclusions;
+  const inclusions = row.inclusions ?? [];
 
   return {
     ...fallback,

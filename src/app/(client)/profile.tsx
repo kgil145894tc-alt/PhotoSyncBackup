@@ -3,10 +3,11 @@ import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
+import { showAppAlert } from '@/components/app-alert';
 import { LogoutConfirmationModal } from '@/components/logout-confirmation-modal';
 import { signOutPhotoSync } from '@/services/auth';
 import { getMyProfile, updateMyProfile, uploadProfileAvatar, type UserProfile } from '@/services/profile';
@@ -62,7 +63,7 @@ export default function ProfileScreen() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
-      Alert.alert('Permission needed', 'Please allow PhotoSync to choose images from your gallery.');
+      showAppAlert('Permission needed', 'Please allow PhotoSync to choose images from your gallery.');
       return;
     }
 
@@ -88,7 +89,7 @@ export default function ProfileScreen() {
 
     if (!uploadResult.success || !uploadResult.publicUrl) {
       setIsUploadingAvatar(false);
-      Alert.alert('Photo not uploaded', uploadResult.message ?? 'Please check your Supabase Storage setup.');
+      showAppAlert('Photo not uploaded', uploadResult.message ?? 'Please check your Supabase Storage setup.');
       return;
     }
 
@@ -101,7 +102,7 @@ export default function ProfileScreen() {
 
     if (!saveResult.success) {
       setIsUploadingAvatar(false);
-      Alert.alert('Profile photo not saved', saveResult.message ?? 'Please try again.');
+      showAppAlert('Profile photo not saved', saveResult.message ?? 'Please try again.');
       return;
     }
 

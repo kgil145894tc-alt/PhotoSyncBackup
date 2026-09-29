@@ -5,6 +5,7 @@ create table if not exists public.profiles (
   email text,
   full_name text,
   phone text,
+  username text,
   created_at timestamptz not null default now()
 );
 
@@ -148,13 +149,19 @@ security definer
 set search_path = public
 as $$
 begin
-  insert into public.profiles (id, role, full_name)
+  insert into public.profiles (id, role, email, full_name, username)
   values (
     new.id,
     'client',
-    new.raw_user_meta_data ->> 'full_name'
+    lower(new.email),
+    new.raw_user_meta_data ->> 'full_name',
+    lower(nullif(trim(new.raw_user_meta_data ->> 'username'), ''))
   )
-  on conflict (id) do nothing;
+  on conflict (id) do update
+  set
+    email = coalesce(excluded.email, public.profiles.email),
+    full_name = coalesce(excluded.full_name, public.profiles.full_name),
+    username = coalesce(excluded.username, public.profiles.username);
 
   return new;
 end;
@@ -217,6 +224,10 @@ with check (
   auth.uid() = id
   and role = 'client'
 );
+
+create unique index if not exists profiles_username_unique_idx
+on public.profiles (lower(username))
+where username is not null and username <> '';
 
 create policy "Active services are public"
 on public.services for select

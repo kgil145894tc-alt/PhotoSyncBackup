@@ -76,15 +76,25 @@ export default function PhotographerDashboardScreen() {
   const loadDashboardData = useCallback(async (isMounted: () => boolean = () => true) => {
     setIsDashboardLoading(true);
 
-    const [bookingItems, unreadCount] = await Promise.all([
-      getAdminBookingRequests(),
-      getMyUnreadNotificationCount(),
-    ]);
+    try {
+      const [bookingItems, unreadCount] = await Promise.all([
+        getAdminBookingRequests(),
+        getMyUnreadNotificationCount(),
+      ]);
 
-    if (isMounted()) {
-      setBookings(bookingItems);
-      setUnreadNotificationCount(unreadCount);
-      setIsDashboardLoading(false);
+      if (isMounted()) {
+        setBookings(bookingItems);
+        setUnreadNotificationCount(unreadCount);
+      }
+    } catch {
+      if (isMounted()) {
+        setBookings([]);
+        setUnreadNotificationCount(0);
+      }
+    } finally {
+      if (isMounted()) {
+        setIsDashboardLoading(false);
+      }
     }
   }, []);
 
@@ -155,13 +165,13 @@ export default function PhotographerDashboardScreen() {
               onPress={() => router.push('/photographer/notifications')}
               style={({ pressed }) => [styles.adminDashboardNotificationButton, pressed && { opacity: 0.72 }]}>
               <StatIcon name="bell" size={25} />
-              {unreadNotificationCountText && (
+              {unreadNotificationCountText ? (
                 <View style={styles.adminDashboardNotificationBadge}>
                   <Text style={styles.adminDashboardNotificationBadgeText}>
                     {unreadNotificationCountText}
                   </Text>
                 </View>
-              )}
+              ) : null}
             </Pressable>
           </View>
           <Text style={styles.adminDashboardSubtitle}>See how your business is doing today.</Text>

@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
+import { useRedirectSignedInUser } from '@/hooks/use-auth-routing';
 import { introStyles as styles } from '@/styles/intro.styles';
 
 const FIGMA_WIDTH = 412;
@@ -10,6 +11,8 @@ const FIGMA_HEIGHT = 918;
 
 export default function HomeScreen() {
   const { width, height } = useWindowDimensions();
+  useRedirectSignedInUser();
+
   const scale = Math.min(width / FIGMA_WIDTH, height / FIGMA_HEIGHT);
   const frameWidth = FIGMA_WIDTH * scale;
   const frameHeight = FIGMA_HEIGHT * scale;

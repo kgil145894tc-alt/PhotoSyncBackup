@@ -2,10 +2,11 @@ import { router, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
+import { showAppAlert } from '@/components/app-alert';
 import { getMyNotifications, markNotificationRead } from '@/services/notifications';
 import { bottomNavMetrics } from '@/styles/navigation.styles';
 import { photographerStyles as styles } from '@/styles/photographer.styles';
@@ -63,7 +64,7 @@ export default function PhotographerNotificationsScreen() {
           current.map((item) => (item.id === notification.id ? { ...item, isRead: true } : item)),
         );
       } else {
-        Alert.alert('Notification not updated', result.message ?? 'Please try again.');
+        showAppAlert('Notification not updated', result.message ?? 'Please try again.');
       }
     }
 

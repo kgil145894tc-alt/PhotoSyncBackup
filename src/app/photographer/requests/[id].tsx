@@ -2,11 +2,12 @@ import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
 import { AdminBrandHeader } from '@/components/admin-brand-header';
+import { showAppAlert } from '@/components/app-alert';
 import {
   formatStatusLabel,
   getAdditionalNotes,
@@ -60,7 +61,7 @@ export default function PhotographerRequestDetailScreen() {
 
   async function handleStatusUpdate(status: Extract<BookingStatus, 'completed' | 'confirmed' | 'rejected'>, reason?: string | null) {
     if (!booking || (status === 'completed' ? booking.status !== 'confirmed' : booking.status !== 'pending')) {
-      Alert.alert(
+      showAppAlert(
         'Request already updated',
         status === 'completed' ? 'This booking is no longer confirmed.' : 'This booking request is no longer pending.',
       );
@@ -69,7 +70,7 @@ export default function PhotographerRequestDetailScreen() {
     }
 
     if (status === 'rejected' && !reason?.trim()) {
-      Alert.alert('Reason required', 'Please enter a short reason before rejecting this request.');
+      showAppAlert('Reason required', 'Please enter a short reason before rejecting this request.');
       return;
     }
 
@@ -79,7 +80,7 @@ export default function PhotographerRequestDetailScreen() {
     if (!result.success) {
       setIsUpdating(false);
       await loadBooking();
-      Alert.alert('Request not updated', result.message ?? 'Please try again.');
+      showAppAlert('Request not updated', result.message ?? 'Please try again.');
       return;
     }
 

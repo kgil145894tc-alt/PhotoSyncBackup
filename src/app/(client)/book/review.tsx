@@ -2,10 +2,11 @@ import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
+import { showAppAlert } from '@/components/app-alert';
 import { BookingStepIndicator } from '@/components/booking-step-indicator';
 import { clearBookingDraft, getBookingDraft, getSelectedPackage } from '@/services/booking-draft';
 import { submitBookingRequest } from '@/services/bookings';
@@ -145,7 +146,7 @@ export default function BookingReviewScreen() {
               setIsSubmitting(false);
 
               if (!result.success) {
-                Alert.alert('Booking not submitted', result.message ?? 'Please try again.');
+                showAppAlert('Booking not submitted', result.message ?? 'Please try again.');
                 return;
               }
 

@@ -7,7 +7,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
 import { fallbackPortraitPackages } from '@/data/service-catalog';
-import { setStackSlideAnimation } from '@/navigation/tab-navigation';
 import { setSelectedPackage } from '@/services/booking-draft';
 import { getPackagesForService } from '@/services/service-catalog';
 import { portraitPackageStyles as styles } from '@/styles/portrait-packages.styles';
@@ -136,7 +135,6 @@ function PackageCard({
         accessibilityLabel={`Select ${item.name}`}
         onPress={() => {
           setSelectedPackage(item);
-          setStackSlideAnimation('slide_from_right');
           router.push('/book/selected');
         }}
         style={({ pressed }) => [

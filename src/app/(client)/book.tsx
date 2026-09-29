@@ -2,10 +2,11 @@ import { Image, type ImageSource } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
+import { showAppAlert } from '@/components/app-alert';
 import { fallbackPortraitPackages } from '@/data/service-catalog';
 import { formatBookingDate, formatBookingTimeRange, formatShortBookingDate } from '@/services/admin-bookings';
 import { subscribeToBookingsChanged } from '@/services/booking-events';
@@ -85,14 +86,14 @@ export default function BookingScreen() {
 
     if (!result.success) {
       setIsCancelling(false);
-      Alert.alert('Booking not cancelled', result.message ?? 'Please try again.');
+      showAppAlert('Booking not cancelled', result.message ?? 'Please try again.');
       return;
     }
 
     setCancelTarget(null);
     await refreshBookings(false);
     setIsCancelling(false);
-    Alert.alert('Booking cancelled', 'The admin has been notified.');
+    showAppAlert('Booking cancelled', 'The admin has been notified.');
   }
 
   async function handleRescheduleBooking(booking: AdminBookingRequest) {
@@ -101,7 +102,7 @@ export default function BookingScreen() {
     setReschedulingBookingId(null);
 
     if (!result.success || !result.packageItem) {
-      Alert.alert('Cannot reschedule', result.message ?? 'Please try again.');
+      showAppAlert('Cannot reschedule', result.message ?? 'Please try again.');
       return;
     }
 
@@ -443,7 +444,7 @@ function CancelBookingDrawer({
   const drawerWidth = Math.min(width, 412);
 
   return (
-    <Modal animationType="slide" onRequestClose={onClose} transparent visible={Boolean(booking)}>
+    <Modal animationType="none" onRequestClose={onClose} transparent visible={Boolean(booking)}>
       <View style={styles.cancelDrawerOverlay}>
         <Pressable accessibilityLabel="Close cancel drawer" accessibilityRole="button" onPress={onClose} style={styles.cancelDrawerScrim} />
         <View style={[styles.cancelDrawer, { paddingBottom: Math.max(24, insets.bottom + 18), width: drawerWidth }]}>

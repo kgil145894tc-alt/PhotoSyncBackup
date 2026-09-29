@@ -82,6 +82,10 @@ export async function removeCurrentPushNotificationToken() {
 }
 
 export function observePushNotificationResponses() {
+  if (Platform.OS === 'web') {
+    return () => {};
+  }
+
   const lastResponse = Notifications.getLastNotificationResponse();
 
   if (lastResponse?.notification) {

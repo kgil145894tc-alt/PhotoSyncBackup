@@ -2,10 +2,11 @@ import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
+import { showAppAlert } from '@/components/app-alert';
 import { BookingStepIndicator } from '@/components/booking-step-indicator';
 import { getSelectedPackage, setBookingSchedule } from '@/services/booking-draft';
 import { rescheduleClientBooking } from '@/services/client-bookings';
@@ -34,6 +35,7 @@ export default function BookingScheduleScreen() {
   const { height, width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const isRescheduleMode = mode === 'reschedule' && Boolean(bookingId);
+  const [isCheckingAvailability, setIsCheckingAvailability] = useState(false);
   const [isSavingReschedule, setIsSavingReschedule] = useState(false);
   const selectedPackage = getSelectedPackage();
   const requiredDurationMinutes = selectedPackage.durationMinutes ?? 0;
@@ -75,7 +77,7 @@ export default function BookingScheduleScreen() {
     selectedSlot?.status === 'available' &&
     doesSlotFitDuration(selectedSlot, requiredDurationMinutes);
 
-  async function loadSlots(date: string) {
+  async function loadSlots(date: string, preferredSlotId = selectedSlot?.id) {
     if (!isBookableDate(date, earliestBookableDate)) {
       setTimeSlots([]);
       setSelectedSlot(null);
@@ -87,10 +89,28 @@ export default function BookingScheduleScreen() {
       date,
       durationMinutes: requiredDurationMinutes,
     });
+    const preferredSlot =
+      slots.find((slot) => slot.id === preferredSlotId && isClientSelectableSlot(slot, requiredDurationMinutes)) ?? null;
     const firstAvailableSlot = slots.find((slot) => isClientSelectableSlot(slot, requiredDurationMinutes)) ?? null;
 
     setTimeSlots(slots);
-    setSelectedSlot(firstAvailableSlot);
+    setSelectedSlot(preferredSlot ?? firstAvailableSlot);
+  }
+
+  async function refreshSelectedSlotAvailability(slot: CalendarTimeSlot) {
+    const slots = await getClientBookableSlotsForDate({
+      bufferMinutes,
+      date: selectedDate,
+      durationMinutes: requiredDurationMinutes,
+    });
+    const availableSelectedSlot =
+      slots.find((item) => item.id === slot.id && isClientSelectableSlot(item, requiredDurationMinutes)) ?? null;
+    const firstAvailableSlot = slots.find((item) => isClientSelectableSlot(item, requiredDurationMinutes)) ?? null;
+
+    setTimeSlots(slots);
+    setSelectedSlot(availableSelectedSlot ?? firstAvailableSlot);
+
+    return availableSelectedSlot;
   }
 
   async function changeMonth(monthOffset: number) {
@@ -103,7 +123,7 @@ export default function BookingScheduleScreen() {
     setCalendarMonth(nextMonth);
     setDaySummaries(summaries);
     setSelectedDate(nextSelectedDate);
-    await loadSlots(nextSelectedDate);
+    await loadSlots(nextSelectedDate, undefined);
   }
 
   useEffect(() => {
@@ -227,7 +247,7 @@ export default function BookingScheduleScreen() {
                   key={`${day.date}-${index}`}
                   onPress={() => {
                     setSelectedDate(date);
-                    loadSlots(date);
+                    loadSlots(date, undefined);
                   }}
                   style={[
                     styles.dayButton,
@@ -305,19 +325,30 @@ export default function BookingScheduleScreen() {
           <Pressable
             accessibilityLabel="Continue"
             accessibilityRole="button"
-            disabled={!canContinue || isSavingReschedule}
+            disabled={!canContinue || isCheckingAvailability || isSavingReschedule}
             onPress={async () => {
-              if (!canContinue || !selectedSlot) {
-                Alert.alert('Select another time', 'Please choose an available time slot that fits this package duration.');
+              const slotToConfirm = selectedSlot;
+
+              if (!canContinue || !slotToConfirm) {
+                showAppAlert('Select another time', 'Please choose an available time slot that fits this package duration.');
+                return;
+              }
+
+              setIsCheckingAvailability(true);
+              const availableSelectedSlot = await refreshSelectedSlotAvailability(slotToConfirm);
+              setIsCheckingAvailability(false);
+
+              if (!availableSelectedSlot) {
+                showAppAlert('Slot already taken', 'That time was just booked. Please choose another available slot.');
                 return;
               }
 
               const schedule = {
                 bookingDate: selectedDate,
                 displayDate: formatSelectedDate(selectedDate),
-                displayTime: formatSlotTimeRange(selectedSlot),
-                endTime: selectedSlot.endTime,
-                startTime: selectedSlot.startTime,
+                displayTime: formatSlotTimeRange(availableSelectedSlot),
+                endTime: availableSelectedSlot.endTime,
+                startTime: availableSelectedSlot.startTime,
               };
 
               if (isRescheduleMode && bookingId) {
@@ -326,11 +357,11 @@ export default function BookingScheduleScreen() {
                 setIsSavingReschedule(false);
 
                 if (!result.success) {
-                  Alert.alert('Booking not rescheduled', result.message ?? 'Please try again.');
+                  showAppAlert('Booking not rescheduled', result.message ?? 'Please try again.');
                   return;
                 }
 
-                Alert.alert('Reschedule sent', 'Your new schedule was sent to the admin for confirmation.');
+                showAppAlert('Reschedule sent', 'Your new schedule was sent to the admin for confirmation.');
                 router.replace('/book');
                 return;
               }
@@ -350,7 +381,7 @@ export default function BookingScheduleScreen() {
               },
             ]}>
             <Text style={[styles.continueText, { fontSize: px(24), lineHeight: px(38) }]}>
-              {isSavingReschedule ? 'Saving...' : isRescheduleMode ? 'Save Schedule' : 'Continue'}
+              {isCheckingAvailability ? 'Checking...' : isSavingReschedule ? 'Saving...' : isRescheduleMode ? 'Save Schedule' : 'Continue'}
             </Text>
             <ArrowRight size={px(31)} />
           </Pressable>

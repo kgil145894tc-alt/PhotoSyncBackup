@@ -6,7 +6,6 @@ import { Animated, Easing, Pressable, ScrollView, Text, useWindowDimensions, Vie
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
-import { setStackSlideAnimation } from '@/navigation/tab-navigation';
 import { setSelectedPackage } from '@/services/booking-draft';
 import {
   getCachedPackagesForService,
@@ -219,7 +218,6 @@ function PackageCard({
         accessibilityLabel={`Select ${item.name}`}
         onPress={() => {
           setSelectedPackage(item);
-          setStackSlideAnimation('slide_from_right');
           router.push('/book/selected');
         }}
         style={({ pressed }) => [

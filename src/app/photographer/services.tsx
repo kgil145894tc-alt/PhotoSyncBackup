@@ -2,10 +2,11 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
+import { showAppAlert } from '@/components/app-alert';
 import { AdminBrandHeader } from '@/components/admin-brand-header';
 import {
   getCachedAdminPackagesCatalog,
@@ -41,6 +42,10 @@ export default function PhotographerServicesScreen() {
   const [editingService, setEditingService] = useState<ServiceCatalogItem | null>(null);
   const [isPackageFormVisible, setIsPackageFormVisible] = useState(false);
   const [isServiceFormVisible, setIsServiceFormVisible] = useState(false);
+  const [isDeletingPackage, setIsDeletingPackage] = useState(false);
+  const [isDeletingService, setIsDeletingService] = useState(false);
+  const [pendingDeletePackage, setPendingDeletePackage] = useState<PackageCatalogItem | null>(null);
+  const [pendingDeleteService, setPendingDeleteService] = useState<ServiceCatalogItem | null>(null);
   const [packages, setPackages] = useState<PackageCatalogItem[]>(() => getCachedAdminPackagesCatalog() ?? []);
   const [selectedServiceId, setSelectedServiceId] = useState(() => getCachedAdminServicesCatalog()?.find((service) => service.isActive)?.id ?? '');
   const [services, setServices] = useState<ServiceCatalogItem[]>(() => getCachedAdminServicesCatalog() ?? []);
@@ -92,7 +97,7 @@ export default function PhotographerServicesScreen() {
     }
 
     if (!activeServices.length) {
-      Alert.alert('Add a category first', 'Please create a service category before adding packages.');
+      showAppAlert('Add a category first', 'Please create a service category before adding packages.');
       return;
     }
 
@@ -101,37 +106,71 @@ export default function PhotographerServicesScreen() {
   }
 
   function deleteService(service: ServiceCatalogItem) {
-    Alert.alert(
-      'Delete service?',
-      `This will remove ${service.name} from your services list. Existing bookings will keep their saved details.`,
-      [
-        { style: 'cancel', text: 'Cancel' },
-        {
-          onPress: async () => {
-            const result = await setServiceActive(service.id, false);
-
-            if (!result.success) {
-              Alert.alert('Service not deleted', result.message ?? 'Please try again.');
-              return;
-            }
-
-            await refreshCatalog();
-          },
-          style: 'destructive',
-          text: 'Delete',
-        },
-      ],
-    );
+    setPendingDeleteService(service);
   }
 
-  async function togglePackage(item: PackageCatalogItem) {
-    const result = await setPackageActive(item.id, !item.isActive);
-
-    if (!result.success) {
-      Alert.alert('Package not updated', result.message ?? 'Please try again.');
+  async function confirmDeleteService() {
+    if (!pendingDeleteService || isDeletingService) {
       return;
     }
 
+    setIsDeletingService(true);
+
+    const result = await setServiceActive(pendingDeleteService.id, false);
+
+    if (!result.success) {
+      setIsDeletingService(false);
+      showAppAlert('Service not deleted', result.message ?? 'Please try again.');
+      return;
+    }
+
+    const deletedServiceId = pendingDeleteService.id;
+
+    setServices((currentServices) => {
+      const nextServices = currentServices.map((item) => (
+        item.id === deletedServiceId ? { ...item, isActive: false } : item
+      ));
+
+      setSelectedServiceId((currentId) => (
+        currentId === deletedServiceId
+          ? nextServices.find((item) => item.isActive && item.id !== deletedServiceId)?.id ?? ''
+          : currentId
+      ));
+
+      return nextServices;
+    });
+
+    setPendingDeleteService(null);
+    setIsDeletingService(false);
+    await refreshCatalog();
+  }
+
+  function deletePackage(item: PackageCatalogItem) {
+    setPendingDeletePackage(item);
+  }
+
+  async function confirmDeletePackage() {
+    if (!pendingDeletePackage || isDeletingPackage) {
+      return;
+    }
+
+    setIsDeletingPackage(true);
+
+    const result = await setPackageActive(pendingDeletePackage.id, false);
+
+    if (!result.success) {
+      setIsDeletingPackage(false);
+      showAppAlert('Package not updated', result.message ?? 'Please try again.');
+      return;
+    }
+
+    const deletedPackageId = pendingDeletePackage.id;
+
+    setPackages((currentPackages) => currentPackages.map((item) => (
+      item.id === deletedPackageId ? { ...item, isActive: false } : item
+    )));
+    setPendingDeletePackage(null);
+    setIsDeletingPackage(false);
     await refreshCatalog();
   }
 
@@ -190,7 +229,7 @@ export default function PhotographerServicesScreen() {
                       setEditingPackage(item);
                       setIsPackageFormVisible(true);
                     }}
-                    onToggle={() => togglePackage(item)}
+                    onToggle={() => deletePackage(item)}
                     variant="figma"
                   />
                 ))
@@ -252,12 +291,119 @@ export default function PhotographerServicesScreen() {
       <PackageFormModal
         item={editingPackage}
         key={`package-${editingPackage?.id ?? 'new'}-${isPackageFormVisible}`}
+        lockedServiceId={activeView === 'packages' ? selectedService?.id ?? null : null}
         onClose={() => setIsPackageFormVisible(false)}
         onSaved={refreshCatalog}
         services={activeServices}
         visible={isPackageFormVisible}
       />
+      <DeleteServiceModal
+        isDeleting={isDeletingService}
+        onCancel={() => {
+          if (!isDeletingService) {
+            setPendingDeleteService(null);
+          }
+        }}
+        onDelete={confirmDeleteService}
+        service={pendingDeleteService}
+      />
+      <DeletePackageModal
+        isDeleting={isDeletingPackage}
+        onCancel={() => {
+          if (!isDeletingPackage) {
+            setPendingDeletePackage(null);
+          }
+        }}
+        onDelete={confirmDeletePackage}
+        packageItem={pendingDeletePackage}
+      />
     </View>
+  );
+}
+
+function DeletePackageModal({
+  isDeleting,
+  onCancel,
+  onDelete,
+  packageItem,
+}: {
+  isDeleting: boolean;
+  onCancel: () => void;
+  onDelete: () => void;
+  packageItem: PackageCatalogItem | null;
+}) {
+  return (
+    <Modal animationType="none" onRequestClose={onCancel} transparent visible={Boolean(packageItem)}>
+      <View style={formStyles.confirmOverlay}>
+        <View style={formStyles.confirmCard}>
+          <Text style={formStyles.confirmTitle}>Delete package?</Text>
+          <Text style={formStyles.confirmMessage}>
+            {packageItem
+              ? `This will remove ${packageItem.name} from this service. Packages with existing bookings cannot be deleted.`
+              : ''}
+          </Text>
+          <View style={formStyles.confirmActions}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={isDeleting}
+              onPress={onCancel}
+              style={[formStyles.confirmCancelButton, isDeleting && { opacity: 0.7 }]}>
+              <Text style={formStyles.confirmCancelText}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={isDeleting}
+              onPress={onDelete}
+              style={[formStyles.confirmDeleteButton, isDeleting && { opacity: 0.7 }]}>
+              <Text style={formStyles.confirmDeleteText}>{isDeleting ? 'Deleting...' : 'Delete'}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function DeleteServiceModal({
+  isDeleting,
+  onCancel,
+  onDelete,
+  service,
+}: {
+  isDeleting: boolean;
+  onCancel: () => void;
+  onDelete: () => void;
+  service: ServiceCatalogItem | null;
+}) {
+  return (
+    <Modal animationType="none" onRequestClose={onCancel} transparent visible={Boolean(service)}>
+      <View style={formStyles.confirmOverlay}>
+        <View style={formStyles.confirmCard}>
+          <Text style={formStyles.confirmTitle}>Delete service?</Text>
+          <Text style={formStyles.confirmMessage}>
+            {service
+              ? `This will remove ${service.name} from your active services. Services with existing bookings cannot be deleted.`
+              : ''}
+          </Text>
+          <View style={formStyles.confirmActions}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={isDeleting}
+              onPress={onCancel}
+              style={[formStyles.confirmCancelButton, isDeleting && { opacity: 0.7 }]}>
+              <Text style={formStyles.confirmCancelText}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={isDeleting}
+              onPress={onDelete}
+              style={[formStyles.confirmDeleteButton, isDeleting && { opacity: 0.7 }]}>
+              <Text style={formStyles.confirmDeleteText}>{isDeleting ? 'Deleting...' : 'Delete'}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -312,8 +458,8 @@ function AdminPackageItem({
           <Text numberOfLines={1} style={styles.servicesPackageName}>{item.name}</Text>
           <Text style={styles.servicesPackagePrice}>{item.price}</Text>
           <View style={styles.servicesInclusionList}>
-            {item.inclusions.slice(0, 6).map((inclusion) => (
-              <View key={inclusion} style={styles.servicesInclusionRow}>
+            {item.inclusions.slice(0, 6).map((inclusion, index) => (
+              <View key={`${item.id}-${index}`} style={styles.servicesInclusionRow}>
                 <View style={styles.servicesInclusionDot} />
                 <Text numberOfLines={1} style={styles.servicesInclusionText}>{inclusion}</Text>
               </View>
@@ -377,7 +523,6 @@ function ServiceFormModal({
   const [minimumNoticeDays, setMinimumNoticeDays] = useState(service?.minimumNoticeDays ? String(service.minimumNoticeDays) : '1');
   const [pickedImage, setPickedImage] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [name, setName] = useState(service?.name ?? '');
-  const [slug, setSlug] = useState(service?.slug ?? '');
 
   async function handleSave() {
     if (isSaving) {
@@ -385,7 +530,14 @@ function ServiceFormModal({
     }
 
     if (!name.trim()) {
-      Alert.alert('Missing name', 'Please enter a service category name.');
+      showAppAlert('Missing name', 'Please enter a service category name.');
+      return;
+    }
+
+    const generatedSlug = toSlug(name);
+
+    if (!generatedSlug) {
+      showAppAlert('Invalid name', 'Please use letters or numbers in the service category name.');
       return;
     }
 
@@ -408,13 +560,13 @@ function ServiceFormModal({
       isActive,
       minimumNoticeDays: minimumNoticeDays ? Math.round(Number(minimumNoticeDays)) : 0,
       name,
-      slug: slug.trim() || toSlug(name),
+      slug: generatedSlug,
     };
     const result = await saveServiceCategory(formValues);
 
     if (!result.success) {
       setIsSaving(false);
-      Alert.alert('Service not saved', result.message ?? 'Please try again.');
+      showAppAlert('Service not saved', result.message ?? 'Please try again.');
       return;
     }
 
@@ -424,7 +576,7 @@ function ServiceFormModal({
   }
 
   return (
-    <Modal animationType="slide" onRequestClose={onClose} visible={visible}>
+    <Modal animationType="none" onRequestClose={onClose} visible={visible}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
@@ -454,7 +606,6 @@ function ServiceFormModal({
           </View>
 
           <FormInput label="Service Name" onChangeText={setName} required value={name} />
-          <FormInput label="Slug" onChangeText={setSlug} value={slug} />
           <FormInput label="Description" multiline onChangeText={setDescription} value={description} />
           <FormInput keyboardType="numeric" label="Base Price" onChangeText={setBasePrice} required value={basePrice} />
           <FormInput keyboardType="numeric" label="Duration Hours" onChangeText={setDurationHours} value={durationHours} />
@@ -477,12 +628,14 @@ function ServiceFormModal({
 
 function PackageFormModal({
   item,
+  lockedServiceId,
   onClose,
   onSaved,
   services,
   visible,
 }: {
   item: PackageCatalogItem | null;
+  lockedServiceId?: string | null;
   onClose: () => void;
   onSaved: () => Promise<void>;
   services: ServiceCatalogItem[];
@@ -498,8 +651,9 @@ function PackageFormModal({
   const [name, setName] = useState(item?.name ?? '');
   const [pickedImage, setPickedImage] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [priceAmount, setPriceAmount] = useState(item ? String(item.priceAmount) : '');
-  const [serviceId, setServiceId] = useState(item?.serviceId ?? services[0]?.id ?? '');
+  const [serviceId, setServiceId] = useState(item?.serviceId ?? lockedServiceId ?? services[0]?.id ?? '');
   const selectedService = services.find((service) => service.id === serviceId);
+  const isCategoryLocked = Boolean(lockedServiceId);
 
   async function handleSave() {
     if (isSaving) {
@@ -507,7 +661,7 @@ function PackageFormModal({
     }
 
     if (!name.trim() || !serviceId) {
-      Alert.alert('Missing package details', 'Please enter a package name and choose a category.');
+      showAppAlert('Missing package details', 'Please enter a package name and choose a category.');
       return;
     }
 
@@ -536,7 +690,7 @@ function PackageFormModal({
 
     if (!result.success) {
       setIsSaving(false);
-      Alert.alert('Package not saved', result.message ?? 'Please try again.');
+      showAppAlert('Package not saved', result.message ?? 'Please try again.');
       return;
     }
 
@@ -558,7 +712,7 @@ function PackageFormModal({
   }
 
   return (
-    <Modal animationType="slide" onRequestClose={onClose} visible={visible}>
+    <Modal animationType="none" onRequestClose={onClose} visible={visible}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
@@ -584,39 +738,48 @@ function PackageFormModal({
             <Pressable accessibilityLabel="Close package form" accessibilityRole="button" hitSlop={10} onPress={onClose} style={formStyles.backButton}>
               <ServiceBackIcon />
             </Pressable>
-            <Text style={formStyles.headerTitle}>{item ? 'Edit Service' : 'Add New Service'}</Text>
+            <Text style={formStyles.headerTitle}>{item ? 'Edit Package' : 'Add New Package'}</Text>
           </View>
 
-          <View style={formStyles.dropdownField}>
-            <Text style={formStyles.label}>Select Category <Text style={formStyles.required}>*</Text></Text>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setIsCategoryPickerOpen((value) => !value)}
-              style={formStyles.selectInput}>
-              <Text numberOfLines={1} style={formStyles.inputText}>{selectedService?.name ?? 'Select category'}</Text>
-              <ChevronDownIcon />
-            </Pressable>
-            {isCategoryPickerOpen ? (
-              <View style={formStyles.categoryList}>
-                <ScrollView bounces={false} nestedScrollEnabled style={formStyles.categoryMenu}>
-                  {services.map((service) => (
-                    <Pressable
-                      accessibilityRole="button"
-                      key={service.id}
-                      onPress={() => {
-                        setServiceId(service.id);
-                        setIsCategoryPickerOpen(false);
-                      }}
-                      style={[formStyles.categoryOption, serviceId === service.id && formStyles.activeCategoryOption]}>
-                      <Text style={[formStyles.categoryText, serviceId === service.id && formStyles.activeCategoryText]}>
-                        {service.name}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
+          {isCategoryLocked ? (
+            <View style={formStyles.field}>
+              <Text style={formStyles.label}>Category</Text>
+              <View style={formStyles.lockedInput}>
+                <Text numberOfLines={1} style={formStyles.inputText}>{selectedService?.name ?? 'Selected category'}</Text>
               </View>
-            ) : null}
-          </View>
+            </View>
+          ) : (
+            <View style={formStyles.dropdownField}>
+              <Text style={formStyles.label}>Select Category <Text style={formStyles.required}>*</Text></Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setIsCategoryPickerOpen((value) => !value)}
+                style={formStyles.selectInput}>
+                <Text numberOfLines={1} style={formStyles.inputText}>{selectedService?.name ?? 'Select category'}</Text>
+                <ChevronDownIcon />
+              </Pressable>
+              {isCategoryPickerOpen ? (
+                <View style={formStyles.categoryList}>
+                  <ScrollView bounces={false} nestedScrollEnabled style={formStyles.categoryMenu}>
+                    {services.map((service) => (
+                      <Pressable
+                        accessibilityRole="button"
+                        key={service.id}
+                        onPress={() => {
+                          setServiceId(service.id);
+                          setIsCategoryPickerOpen(false);
+                        }}
+                        style={[formStyles.categoryOption, serviceId === service.id && formStyles.activeCategoryOption]}>
+                        <Text style={[formStyles.categoryText, serviceId === service.id && formStyles.activeCategoryText]}>
+                          {service.name}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
+            </View>
+          )}
 
           <FormInput label="Service Name" onChangeText={setName} required value={name} />
           <FormInput keyboardType="numeric" label="Price" onChangeText={setPriceAmount} required value={priceAmount} />
@@ -651,7 +814,7 @@ function PackageFormModal({
           ))}
 
           <ActiveToggle isActive={isActive} onPress={() => setIsActive((value) => !value)} />
-          <FormActions isSaving={isSaving} onCancel={onClose} onSave={handleSave} saveLabel="Save Service" />
+          <FormActions isSaving={isSaving} onCancel={onClose} onSave={handleSave} saveLabel="Save Package" />
         </ScrollView>
       </KeyboardAvoidingView>
     </Modal>
@@ -697,7 +860,7 @@ function ImagePickerField({
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
-      Alert.alert('Permission needed', 'Please allow PhotoSync to choose images from your gallery.');
+      showAppAlert('Permission needed', 'Please allow PhotoSync to choose images from your gallery.');
       return;
     }
 
@@ -811,7 +974,7 @@ async function uploadPickedImage(pickedImage: ImagePicker.ImagePickerAsset | nul
   });
 
   if (!result.success) {
-    Alert.alert('Image not uploaded', result.message ?? 'Please check your Supabase Storage setup.');
+    showAppAlert('Image not uploaded', result.message ?? 'Please check your Supabase Storage setup.');
     return false;
   }
 

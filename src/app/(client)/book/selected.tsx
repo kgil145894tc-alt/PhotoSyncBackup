@@ -10,6 +10,14 @@ import { bookStyles as styles } from '@/styles/book.styles';
 
 const FIGMA_WIDTH = 412;
 const FIGMA_NAV_TOP = 844;
+const INCLUSION_CARD_TOP = 484;
+const INCLUSION_ROW_HEIGHT = 21;
+const INCLUSION_ROW_GAP = 10;
+const INCLUSION_CARD_VERTICAL_PADDING = 37;
+const INCLUSION_NOTE_HEIGHT = 50;
+const INCLUSION_CARD_MIN_HEIGHT = 218;
+const PRICE_GAP = 16;
+const BOOK_BUTTON_GAP = 9;
 
 const inclusionIcons = ['clock', 'image', 'photos', 'copy', 'copy', 'copy'] as const;
 
@@ -21,10 +29,19 @@ export default function BookScreen() {
     icon: inclusionIcons[index] ?? 'copy',
     label,
   }));
+  const inclusionRowsHeight =
+    inclusions.length * INCLUSION_ROW_HEIGHT + Math.max(0, inclusions.length - 1) * INCLUSION_ROW_GAP;
+  const inclusionCardHeight = Math.max(
+    INCLUSION_CARD_MIN_HEIGHT,
+    INCLUSION_CARD_VERTICAL_PADDING + inclusionRowsHeight + INCLUSION_NOTE_HEIGHT,
+  );
+  const priceTop = INCLUSION_CARD_TOP + inclusionCardHeight + PRICE_GAP;
+  const bookButtonTop = priceTop + 38 + BOOK_BUTTON_GAP;
   const bottomPadding = insets.bottom;
   const availableContentHeight = Math.max(1, height - bottomPadding);
+  const designContentHeight = Math.max(FIGMA_NAV_TOP, bookButtonTop + 64 + 21);
   const scale = Math.min(width / FIGMA_WIDTH, availableContentHeight / FIGMA_NAV_TOP);
-  const contentHeight = FIGMA_NAV_TOP * scale;
+  const contentHeight = designContentHeight * scale;
   const frameWidth = FIGMA_WIDTH * scale;
   const left = (width - frameWidth) / 2;
 
@@ -41,7 +58,7 @@ export default function BookScreen() {
           styles.scrollContent,
           { minHeight: contentHeight + bottomPadding, paddingBottom: bottomPadding },
         ]}
-        scrollEnabled={false}
+        scrollEnabled={contentHeight + bottomPadding > height}
         showsVerticalScrollIndicator={false}
         style={styles.scrollView}>
         <View style={[styles.canvas, { height: contentHeight }]}>
@@ -82,7 +99,7 @@ export default function BookScreen() {
             Your moment, your story.
           </Text>
 
-          <View style={[styles.inclusionCard, { left: x(33), top: y(484), width: px(346), minHeight: px(218), borderRadius: px(10), paddingHorizontal: px(28), paddingTop: px(21), paddingBottom: px(16) }]}>
+          <View style={[styles.inclusionCard, { left: x(33), top: y(INCLUSION_CARD_TOP), width: px(346), minHeight: px(inclusionCardHeight), borderRadius: px(10), paddingHorizontal: px(28), paddingTop: px(21), paddingBottom: px(16) }]}>
             <View style={[styles.inclusionList, { gap: px(10) }]}>
               {inclusions.map((item) => (
                 <View key={item.label} style={styles.inclusionRow}>
@@ -100,7 +117,7 @@ export default function BookScreen() {
             </Text>
           </View>
 
-          <Text style={[styles.price, { left: x(37), top: y(712), width: px(133), fontSize: px(32), lineHeight: px(38) }]}>
+          <Text style={[styles.price, { left: x(37), top: y(priceTop), width: px(133), fontSize: px(32), lineHeight: px(38) }]}>
             {selectedPackage.price}
           </Text>
           <Pressable
@@ -111,7 +128,7 @@ export default function BookScreen() {
               styles.bookButton,
               {
                 left: x(33),
-                top: y(759),
+                top: y(bookButtonTop),
                 width: px(346),
                 height: px(64),
                 borderRadius: px(30),

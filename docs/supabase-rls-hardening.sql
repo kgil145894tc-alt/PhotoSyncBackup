@@ -1,6 +1,9 @@
 -- RLS hardening for PhotoSync.
 -- Run this after the main schema and feature migrations.
 
+alter table public.profiles
+add column if not exists username text;
+
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -8,13 +11,19 @@ security definer
 set search_path = public
 as $$
 begin
-  insert into public.profiles (id, role, full_name)
+  insert into public.profiles (id, role, email, full_name, username)
   values (
     new.id,
     'client',
-    new.raw_user_meta_data ->> 'full_name'
+    lower(new.email),
+    new.raw_user_meta_data ->> 'full_name',
+    lower(nullif(trim(new.raw_user_meta_data ->> 'username'), ''))
   )
-  on conflict (id) do nothing;
+  on conflict (id) do update
+  set
+    email = coalesce(excluded.email, public.profiles.email),
+    full_name = coalesce(excluded.full_name, public.profiles.full_name),
+    username = coalesce(excluded.username, public.profiles.username);
 
   return new;
 end;
@@ -36,6 +45,7 @@ as $$
 $$;
 
 drop policy if exists "Profiles are readable by signed-in users" on public.profiles;
+drop policy if exists "Users can read their own profile" on public.profiles;
 create policy "Users can read their own profile"
 on public.profiles for select
 to authenticated
@@ -48,6 +58,7 @@ to authenticated
 using (public.is_admin());
 
 drop policy if exists "Users can update their own profile" on public.profiles;
+drop policy if exists "Users can update their own profile without changing role" on public.profiles;
 create policy "Users can update their own profile without changing role"
 on public.profiles for update
 to authenticated
@@ -58,6 +69,7 @@ with check (
 );
 
 drop policy if exists "Users can insert their own profile" on public.profiles;
+drop policy if exists "Users can insert their own client profile" on public.profiles;
 create policy "Users can insert their own client profile"
 on public.profiles for insert
 to authenticated

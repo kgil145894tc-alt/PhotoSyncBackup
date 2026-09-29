@@ -59,11 +59,17 @@ export default function HomePageScreen() {
     useCallback(() => {
       let isMounted = true;
 
-      getMyUnreadNotificationCount().then((count) => {
-        if (isMounted) {
-          setUnreadNotificationCount(count);
-        }
-      });
+      getMyUnreadNotificationCount()
+        .then((count) => {
+          if (isMounted) {
+            setUnreadNotificationCount(count);
+          }
+        })
+        .catch(() => {
+          if (isMounted) {
+            setUnreadNotificationCount(0);
+          }
+        });
 
       return () => {
         isMounted = false;
@@ -133,7 +139,7 @@ export default function HomePageScreen() {
         ]}
       >
         <BellIcon color="#4C77A5" size={px(31)} />
-        {unreadNotificationCountText && (
+        {unreadNotificationCountText ? (
           <View
             style={[
               styles.notificationBadge,
@@ -156,7 +162,7 @@ export default function HomePageScreen() {
               {unreadNotificationCountText}
             </Text>
           </View>
-        )}
+        ) : null}
       </Pressable>
 
       <Image

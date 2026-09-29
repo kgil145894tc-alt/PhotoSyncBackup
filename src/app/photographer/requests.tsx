@@ -13,7 +13,7 @@ import { bottomNavMetrics } from '@/styles/navigation.styles';
 import { photographerStyles as styles } from '@/styles/photographer.styles';
 import { type AdminBookingRequest, type BookingStatus } from '@/types/admin-bookings';
 
-const filterOptions: ('all' | BookingStatus)[] = ['all', 'pending', 'confirmed', 'rejected'];
+const filterOptions: ('all' | BookingStatus)[] = ['all', 'pending', 'confirmed', 'completed', 'rejected'];
 const dateFilterOptions: DateFilter[] = ['all', 'today', 'tomorrow', 'thisWeek', 'upcoming'];
 const requestThumbs = [
   require('@/assets/images/admin-request-thumb-1.png'),

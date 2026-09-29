@@ -17,7 +17,11 @@
         "backgroundImage": "./assets/images/photosync-adaptive-icon-background.png",
         "monochromeImage": "./assets/images/photosync-adaptive-icon-foreground.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.kirl123.PhotoSync"
     },
     "web": {
       "output": "static",
@@ -50,6 +54,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "5215d237-41b0-4947-a79f-e537bb73f7a2"
+      }
     }
   }
 }

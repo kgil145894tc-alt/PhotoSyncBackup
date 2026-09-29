@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { getActiveBookingSlotsForDate, type ActiveBookingSlot } from '@/services/booking-availability';
 import { createAuditLog } from '@/services/audit-log';
 import { formatBookingTimeRange } from '@/services/admin-bookings';
 import { fallbackWorkingHoursWindow, getDefaultWorkingHoursWindow } from '@/services/studio-settings';
@@ -17,6 +18,8 @@ type BookingSlotRow = {
   } | null;
   start_time: string;
 };
+
+type BookingSlotSource = ActiveBookingSlot | BookingSlotRow;
 
 type AdminTimeSlotRow = {
   end_time: string;
@@ -99,16 +102,19 @@ export async function getClosedDayCount(monthPrefix = getCurrentDateString().sli
 }
 
 export async function getCalendarSlotsForDate(date: string): Promise<CalendarTimeSlot[]> {
+  return getCalendarSlotsForDateByBookingStatus(date, 'confirmed');
+}
+
+async function getCalendarSlotsForDateByBookingStatus(
+  date: string,
+  bookingStatusMode: 'active' | 'confirmed',
+): Promise<CalendarTimeSlot[]> {
   if (!supabase) {
     return getDefaultSlots([]);
   }
 
-  const [{ data: bookedRows }, { data: adminRows }] = await Promise.all([
-    supabase
-      .from('bookings')
-      .select('id, client_id, booking_date, start_time, end_time, profiles:client_id(full_name)')
-      .eq('booking_date', date)
-      .eq('status', 'confirmed'),
+  const [bookedRows, { data: adminRows }] = await Promise.all([
+    getBookingRowsForCalendar(date, bookingStatusMode),
     supabase
       .from('time_slots')
       .select('id, slot_date, start_time, end_time, status, reason')
@@ -116,9 +122,9 @@ export async function getCalendarSlotsForDate(date: string): Promise<CalendarTim
       .order('start_time', { ascending: true }),
   ]);
 
-  const bookedSlots = ((bookedRows ?? []) as unknown as BookingSlotRow[]).map((booking) => ({
+  const bookedSlots = bookedRows.map((booking) => ({
     bookingId: booking.id,
-    clientName: booking.profiles?.full_name ?? 'Client',
+    clientName: 'profiles' in booking ? booking.profiles?.full_name ?? 'Client' : 'Client',
     endTime: booking.end_time,
     id: `booking-${booking.id}`,
     isCustom: true,
@@ -146,6 +152,33 @@ export async function getCalendarSlotsForDate(date: string): Promise<CalendarTim
   return getDefaultSlots([...bookedSlots, ...adminSlots]);
 }
 
+async function getBookingRowsForCalendar(
+  date: string,
+  bookingStatusMode: 'active' | 'confirmed',
+): Promise<BookingSlotSource[]> {
+  if (bookingStatusMode === 'active') {
+    const result = await getActiveBookingSlotsForDate(date);
+
+    if (result.success) {
+      return result.slots;
+    }
+
+    return [{ end_time: '23:59:00', id: 'availability-check-failed', start_time: '00:00:00' }];
+  }
+
+  if (!supabase) {
+    return [];
+  }
+
+  const { data } = await supabase
+    .from('bookings')
+    .select('id, client_id, booking_date, start_time, end_time, profiles:client_id(full_name)')
+    .eq('booking_date', date)
+    .eq('status', 'confirmed');
+
+  return (data ?? []) as unknown as BookingSlotRow[];
+}
+
 export async function getClientBookableSlotsForDate({
   bufferMinutes = 0,
   date,
@@ -155,7 +188,7 @@ export async function getClientBookableSlotsForDate({
   date: string;
   durationMinutes: number;
 }): Promise<CalendarTimeSlot[]> {
-  const calendarSlots = await getCalendarSlotsForDate(date);
+  const calendarSlots = await getCalendarSlotsForDateByBookingStatus(date, 'active');
   const requiredDuration = Math.max(0, Math.round(durationMinutes));
   const requiredBuffer = Math.max(0, Math.round(bufferMinutes ?? 0));
 

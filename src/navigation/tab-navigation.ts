@@ -1,5 +1,3 @@
-import { useSyncExternalStore } from 'react';
-
 export type ClientTabRoute = '/home' | '/services' | '/book' | '/about' | '/profile';
 export type PhotographerTabRoute =
   | '/photographer'
@@ -20,7 +18,6 @@ export type TabIconName =
   | 'calendar'
   | 'clients'
   | 'notifications';
-export type StackSlideAnimation = 'slide_from_left' | 'slide_from_right';
 
 export type TabItem = {
   accessibilityLabel: string;
@@ -51,9 +48,6 @@ export const TAB_ROUTES = new Set<TabRoute>([
   ...PHOTOGRAPHER_TAB_ITEMS.map((item) => item.route),
 ]);
 
-let stackSlideAnimation: StackSlideAnimation = 'slide_from_right';
-const listeners = new Set<() => void>();
-
 export function getTabRouteIndex(pathname: string) {
   const tabItems = getTabItems(pathname);
   if (pathname === '/photographer/calendar-slots') {
@@ -83,25 +77,4 @@ export function getTabItems(pathname: string) {
 
 function isPathInTabRoute(pathname: string, route: TabRoute) {
   return pathname === route || pathname.startsWith(`${route}/`);
-}
-
-export function setStackSlideAnimation(animation: StackSlideAnimation) {
-  stackSlideAnimation = animation;
-  listeners.forEach((listener) => listener());
-}
-
-export function useStackSlideAnimation() {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-}
-
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-
-  return () => {
-    listeners.delete(listener);
-  };
-}
-
-function getSnapshot() {
-  return stackSlideAnimation;
 }

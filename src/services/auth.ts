@@ -1,6 +1,5 @@
 import { supabase } from '@/lib/supabase';
 import { normalizeUsername, validateUsername } from '@/services/profile';
-import { removeCurrentPushNotificationToken } from '@/services/push-notifications';
 import { AuthRedirectRoute, UserRole } from '@/types/auth';
 
 const AUTH_TIMEOUT_MS = 12000;
@@ -93,9 +92,11 @@ export async function signUpClientAccount({
     return { message: error instanceof Error ? error.message : 'Username setup could not be checked.' };
   }
 
+  const normalizedEmail = email.trim().toLowerCase();
+
   const { data, error } = await withTimeout(
     supabase.auth.signUp({
-      email: email.trim(),
+      email: normalizedEmail,
       options: {
         data: {
           full_name: fullName.trim(),
@@ -112,10 +113,10 @@ export async function signUpClientAccount({
     return { message: getFriendlyAuthMessage(error.message) };
   }
 
-  if (data.user) {
+  if (data.user && data.session) {
     const { error: profileError } = await withTimeout(
       supabase.from('profiles').upsert({
-        email: email.trim().toLowerCase(),
+        email: normalizedEmail,
         full_name: fullName.trim(),
         id: data.user.id,
         role: 'client',
@@ -162,9 +163,34 @@ async function getEmailForUsername(username: string) {
 
 export async function signOutPhotoSync() {
   if (supabase) {
-    await removeCurrentPushNotificationToken();
     await supabase.auth.signOut();
   }
+}
+
+export async function getSignedInUserRole(): Promise<UserRole | null> {
+  if (!supabase) {
+    return null;
+  }
+
+  const { data: sessionData } = await withTimeout(
+    supabase.auth.getSession(),
+    'Checking your session is taking too long. Please log in again.',
+  );
+
+  if (sessionData.session?.user) {
+    return getUserRole(sessionData.session.user.id);
+  }
+
+  const { data, error } = await withTimeout(
+    supabase.auth.getUser(),
+    'Checking your session is taking too long. Please log in again.',
+  );
+
+  if (error || !data.user) {
+    return null;
+  }
+
+  return getUserRole(data.user.id);
 }
 
 export async function sendPasswordResetEmail(email: string, redirectTo: string): Promise<AuthResult> {
@@ -305,6 +331,14 @@ function getFriendlyAuthMessage(message: string) {
 
   if (normalizedMessage.includes('invalid login credentials')) {
     return 'Incorrect email or password.';
+  }
+
+  if (
+    normalizedMessage.includes('already registered') ||
+    normalizedMessage.includes('already exists') ||
+    normalizedMessage.includes('user already')
+  ) {
+    return 'This email already has an account. Please log in instead, or reset your password if you cannot access it.';
   }
 
   if (normalizedMessage.includes('duplicate') || normalizedMessage.includes('unique')) {

@@ -38,7 +38,8 @@ Push notifications require a development or production build. Expo Go is not eno
 2. Initialize/link an EAS project so `extra.eas.projectId` is added to `app.json`: `npx eas-cli@latest init`.
 3. Build a development version for testers: `npx eas-cli@latest build --profile development --platform android` or `npx eas-cli@latest build --profile development --platform ios`.
 4. Deploy the Supabase Edge Function in `supabase/functions/send-push-notification`.
-5. Configure a Supabase Database Webhook for inserts on `public.notifications`, or call the Edge Function after creating a notification row. Send this JSON body:
+5. Optional but recommended: set a `PUSH_WEBHOOK_SECRET` environment variable on the Edge Function. Send the same value in an `x-photosync-webhook-secret` header from your webhook so only trusted callers can trigger push sends.
+6. Configure a Supabase Database Webhook for inserts on `public.notifications`, or call the Edge Function after creating a notification row. Send this JSON body:
 
 ```json
 {

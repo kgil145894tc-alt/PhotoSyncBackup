@@ -4,7 +4,6 @@ import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -15,6 +14,7 @@ import {
   View,
 } from 'react-native';
 
+import { showAppAlert } from '@/components/app-alert';
 import { createPasswordRecoverySession, updatePasswordFromRecovery } from '@/services/auth';
 
 export default function ResetPasswordScreen() {
@@ -63,7 +63,7 @@ export default function ResetPasswordScreen() {
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('Passwords do not match', 'Please confirm your new password.');
+      showAppAlert('Passwords do not match', 'Please confirm your new password.');
       return;
     }
 
@@ -72,7 +72,7 @@ export default function ResetPasswordScreen() {
     setIsSaving(false);
 
     if (result.message) {
-      Alert.alert('PhotoSync', result.message);
+      showAppAlert('PhotoSync', result.message);
     }
 
     if (result.route) {

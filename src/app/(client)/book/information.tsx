@@ -2,10 +2,11 @@ import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
+import { showAppAlert } from '@/components/app-alert';
 import { BookingStepIndicator } from '@/components/booking-step-indicator';
 import { getBookingDraft, setBookingInformation } from '@/services/booking-draft';
 import { getMyProfile } from '@/services/profile';
@@ -222,7 +223,7 @@ export default function BookingInformationScreen() {
               });
 
               if (validationMessage) {
-                Alert.alert('Check your information', validationMessage);
+                showAppAlert('Check your information', validationMessage);
                 return;
               }
 

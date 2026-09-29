@@ -2,10 +2,11 @@ import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
+import { showAppAlert } from '@/components/app-alert';
 import { getMyNotifications, markNotificationRead } from '@/services/notifications';
 import { clientNotificationsStyles as styles } from '@/styles/client-notifications.styles';
 import { type PhotoSyncNotification } from '@/types/notifications';
@@ -188,7 +189,7 @@ export default function ClientNotificationsScreen() {
                           current.map((item) => (item.id === notification.id ? { ...item, isRead: true } : item)),
                         );
                       } else {
-                        Alert.alert('Notification not updated', result.message ?? 'Please try again.');
+                        showAppAlert('Notification not updated', result.message ?? 'Please try again.');
                       }
                     }
 
