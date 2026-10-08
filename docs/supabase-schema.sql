@@ -19,6 +19,7 @@ create table if not exists public.services (
   minimum_notice_days integer not null default 1,
   price numeric(10, 2),
   is_active boolean not null default true,
+  archived_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -30,6 +31,7 @@ create table if not exists public.packages (
   price numeric(10, 2) not null,
   inclusions text[] not null default '{}',
   is_active boolean not null default true,
+  archived_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -302,13 +304,7 @@ to authenticated
 using (
   auth.uid() = client_id
   and status = 'pending'
-  and (
-    booking_date < current_date
-    or (
-      booking_date = current_date
-      and start_time < localtime
-    )
-  )
+  and (booking_date + start_time) < (clock_timestamp() at time zone 'Asia/Manila')
 )
 with check (
   auth.uid() = client_id

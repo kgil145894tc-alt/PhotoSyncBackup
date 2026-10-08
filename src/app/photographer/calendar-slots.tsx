@@ -1,23 +1,24 @@
-import { Image } from 'expo-image';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useBottomNavHeight } from '@/hooks/use-bottom-nav-height';
+import { useClientNavScroll as useNavScroll } from '@/hooks/use-client-nav-scroll';
+import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { showAppAlert } from '@/components/app-alert';
-import { subscribeToBookingsChanged } from '@/services/booking-events';
+import { useAdminCalendarDay } from '@/hooks/use-admin-calendar';
+import { useStudioCalendarClock } from '@/hooks/use-studio-calendar-clock';
+import { getCalendarDayValidationError, getCalendarSlotValidationError, getStudioDateTime, isValidCalendarDate } from '@/services/calendar-date-guards';
 import {
   deleteCalendarSlot,
-  getCalendarSlotsForDate,
-  getCurrentDateString,
   markCalendarDayUnavailable,
   reopenCalendarDay,
   saveCalendarSlot,
 } from '@/services/calendar';
-import { bottomNavMetrics } from '@/styles/navigation.styles';
-import { photographerStyles as styles } from '@/styles/photographer.styles';
+import { adminCalendarSlotsStyles as styles } from '@/styles/admin-calendar-slots.styles';
+import { adminColors } from '@/styles/admin-theme';
 import { type CalendarTimeSlot } from '@/types/calendar';
 
 type TimeSlotNotice = {
@@ -26,54 +27,40 @@ type TimeSlotNotice = {
 };
 
 export default function PhotographerCalendarSlotsScreen() {
+  const navHeight = useBottomNavHeight('admin');
+  const navScroll = useNavScroll();
   const insets = useSafeAreaInsets();
+  const { width, fontScale } = useWindowDimensions();
+  const compactCards = width / fontScale < 440;
   const { date } = useLocalSearchParams<{ date?: string }>();
   const selectedDate = normalizeDateParam(date);
+  const now = useStudioCalendarClock();
+  const dayError = getCalendarDayValidationError(selectedDate, now);
   const [editingSlot, setEditingSlot] = useState<CalendarTimeSlot | null>(null);
   const [endTimeInput, setEndTimeInput] = useState('');
   const [isManageModalVisible, setIsManageModalVisible] = useState(false);
   const [isDeletingSlot, setIsDeletingSlot] = useState(false);
   const [isSlotModalVisible, setIsSlotModalVisible] = useState(false);
   const [pendingDeleteSlot, setPendingDeleteSlot] = useState<CalendarTimeSlot | null>(null);
-  const [selectedSlots, setSelectedSlots] = useState<CalendarTimeSlot[]>([]);
+  const { items: selectedSlots, error, isLoading, isRefreshing, refresh, reconcile: refreshSlots } = useAdminCalendarDay(selectedDate);
   const [startTimeInput, setStartTimeInput] = useState('');
   const [timeSlotNotice, setTimeSlotNotice] = useState<TimeSlotNotice | null>(null);
-  const bottomPadding = bottomNavMetrics.height + insets.bottom + 24;
+  const bottomPadding = navHeight + insets.bottom + 24;
   const isSelectedDayClosed = selectedSlots.some(isFullDayUnavailableSlot);
   const visibleSlots = useMemo(
     () => selectedSlots.filter((slot) => !isFullDayUnavailableSlot(slot)),
     [selectedSlots],
   );
 
-  const refreshSlots = useCallback(async () => {
-    setSelectedSlots(await getCalendarSlotsForDate(selectedDate));
-  }, [selectedDate]);
-
-  useFocusEffect(
-    useCallback(() => {
-      let isMounted = true;
-
-      getCalendarSlotsForDate(selectedDate).then((slots) => {
-        if (isMounted) {
-          setSelectedSlots(slots);
-        }
-      });
-
-      return () => {
-        isMounted = false;
-      };
-    }, [selectedDate]),
-  );
-
-  useEffect(
-    () =>
-      subscribeToBookingsChanged(() => {
-        void refreshSlots();
-      }),
-    [refreshSlots],
-  );
+  function canManageDay() {
+    const message = getCalendarDayValidationError(selectedDate);
+    if (!message) return true;
+    showAppAlert('Date is read-only', message);
+    return false;
+  }
 
   async function updateDayAvailability(status: 'available' | 'unavailable') {
+    if (!canManageDay()) return;
     if (status === 'unavailable' && isSelectedDayClosed) {
       return;
     }
@@ -95,6 +82,7 @@ export default function PhotographerCalendarSlotsScreen() {
   }
 
   function openAddSlotModal() {
+    if (!canManageDay()) return;
     setEditingSlot(null);
     setStartTimeInput('');
     setEndTimeInput('');
@@ -102,6 +90,7 @@ export default function PhotographerCalendarSlotsScreen() {
   }
 
   function openEditSlotModal(slot: CalendarTimeSlot) {
+    if (!canManageDay()) return;
     if (slot.status === 'booked') {
       setTimeSlotNotice({
         message: 'Confirmed bookings cannot be edited here.',
@@ -125,6 +114,7 @@ export default function PhotographerCalendarSlotsScreen() {
   }
 
   async function saveSlotFromModal() {
+    if (!canManageDay()) return;
     const parsedStart = parseTimeInput(startTimeInput);
     const parsedEnd = parseTimeInput(endTimeInput);
 
@@ -141,6 +131,12 @@ export default function PhotographerCalendarSlotsScreen() {
         message: 'End time must be later than start time.',
         title: 'Check time range',
       });
+      return;
+    }
+
+    const validationError = getCalendarSlotValidationError(selectedDate, parsedStart, parsedEnd);
+    if (validationError) {
+      setTimeSlotNotice({ title: 'Slot not saved', message: validationError });
       return;
     }
 
@@ -168,6 +164,7 @@ export default function PhotographerCalendarSlotsScreen() {
   }
 
   function openDeleteSlotModal(slot: CalendarTimeSlot) {
+    if (!canManageDay()) return;
     if (slot.status === 'booked') {
       setTimeSlotNotice({
         message: 'Confirmed booking slots cannot be deleted.',
@@ -191,9 +188,10 @@ export default function PhotographerCalendarSlotsScreen() {
     if (!pendingDeleteSlot || isDeletingSlot) {
       return;
     }
+    if (!canManageDay()) return;
 
     setIsDeletingSlot(true);
-    const result = await deleteCalendarSlot(pendingDeleteSlot.id);
+    const result = await deleteCalendarSlot(pendingDeleteSlot.id, selectedDate);
     setIsDeletingSlot(false);
 
     if (!result.success) {
@@ -208,14 +206,11 @@ export default function PhotographerCalendarSlotsScreen() {
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
-      <Image
-        contentFit="cover"
-        source={require('@/assets/images/admin-calendar-background.png')}
-        style={styles.timeSlotFigmaBackground}
-      />
       <ScrollView
-        bounces={false}
+        {...navScroll}
+        alwaysBounceVertical
         contentContainerStyle={[styles.timeSlotFigmaContent, { paddingBottom: bottomPadding, paddingTop: insets.top + 4 }]}
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => { void refresh(); }} />}
         showsVerticalScrollIndicator={false}>
         <View style={styles.figmaDateHeaderRow}>
           <Pressable
@@ -247,21 +242,33 @@ export default function PhotographerCalendarSlotsScreen() {
           <Text style={styles.figmaTimeSlotTitle}>Time Slots</Text>
           <Pressable
             accessibilityRole="button"
-            onPress={() => setIsManageModalVisible(true)}
-            style={({ pressed }) => [styles.figmaEditButton, pressed && { opacity: 0.82 }]}>
+            accessibilityLabel="Manage time slots"
+            disabled={isLoading || Boolean(error) || Boolean(dayError)}
+            onPress={() => { if (canManageDay()) setIsManageModalVisible(true); }}
+            style={({ pressed }) => [styles.figmaEditButton, dayError && { opacity: 0.45 }, pressed && { opacity: 0.82 }]}>
             <PencilIcon />
             <Text style={styles.figmaEditButtonText}>Edit</Text>
           </Pressable>
         </View>
 
+        {dayError ? <Text accessibilityLiveRegion="polite" style={styles.adminPageSubtitle}>{dayError}</Text> : null}
+
+        {isLoading || error ? (
+          <Text accessibilityLiveRegion="polite" style={styles.adminPageSubtitle}>
+            {error ?? 'Loading time slots...'}
+          </Text>
+        ) : null}
+
         <View style={styles.figmaTimeSlotList}>
           {isSelectedDayClosed ? (
             <View style={styles.figmaSlotCard}>
-              <View style={styles.figmaSlotCardTop}>
-                <ClockIcon />
-                <View style={styles.figmaSlotCopy}>
-                  <Text style={styles.figmaSlotTime}>Unavailable</Text>
-                  <Text style={styles.figmaSlotDuration}>Full day</Text>
+              <View style={[styles.figmaSlotCardTop, compactCards && styles.slotCardCompact]}>
+                <View style={[styles.slotIdentity, compactCards && styles.slotIdentityCompact]}>
+                  <ClockIcon />
+                  <View style={styles.figmaSlotCopy}>
+                    <Text style={styles.figmaSlotTime}>Unavailable</Text>
+                    <Text style={styles.figmaSlotDuration}>Full day</Text>
+                  </View>
                 </View>
                 <View style={[styles.figmaStatusPill, styles.unavailableSlotPill]}>
                     <View style={[styles.figmaStatusPillDot, styles.figmaUnavailableDot]} />
@@ -272,11 +279,13 @@ export default function PhotographerCalendarSlotsScreen() {
           ) : visibleSlots.length ? (
             visibleSlots.map((slot) => (
               <View key={slot.id} style={styles.figmaSlotCard}>
-                <View style={styles.figmaSlotCardTop}>
-                  <ClockIcon />
-                  <View style={styles.figmaSlotCopy}>
-                    <Text style={styles.figmaSlotTime}>{formatCompactSlotTimeRange(slot)}</Text>
-                    <Text style={styles.figmaSlotDuration}>{formatSlotDuration(slot)}</Text>
+                <View style={[styles.figmaSlotCardTop, compactCards && styles.slotCardCompact]}>
+                  <View style={[styles.slotIdentity, compactCards && styles.slotIdentityCompact]}>
+                    <ClockIcon />
+                    <View style={styles.figmaSlotCopy}>
+                      <Text style={styles.figmaSlotTime}>{formatCompactSlotTimeRange(slot)}</Text>
+                      <Text style={styles.figmaSlotDuration}>{formatSlotDuration(slot)}</Text>
+                    </View>
                   </View>
                   <View style={[styles.figmaStatusPill, getSlotStatusPillStyle(slot.status)]}>
                     <View style={[styles.figmaStatusPillDot, getSlotStatusDotStyle(slot.status)]} />
@@ -285,23 +294,23 @@ export default function PhotographerCalendarSlotsScreen() {
                 </View>
                 {slot.status === 'booked' ? (
                   <View style={styles.figmaBookedInfoBox}>
-                    <Text numberOfLines={1} style={styles.figmaBookedClient}>{slot.clientName ?? 'Client'}</Text>
-                    <Text numberOfLines={1} style={styles.figmaBookedPackage}>Booked session</Text>
+                    <Text style={styles.figmaBookedClient}>{slot.clientName ?? 'Client'}</Text>
+                    <Text style={styles.figmaBookedPackage}>Booked session</Text>
                   </View>
                 ) : null}
               </View>
             ))
-          ) : (
+          ) : !isLoading && !error ? (
             <View style={styles.figmaSlotCard}>
               <View style={styles.figmaSlotCardTop}>
                 <ClockIcon />
                 <View style={styles.figmaSlotCopy}>
                   <Text style={styles.figmaSlotTime}>No time slots</Text>
-                  <Text style={styles.figmaSlotDuration}>Use Edit to add time</Text>
+                  <Text style={styles.figmaSlotDuration}>{dayError ? 'Past dates are view only' : 'Use Edit to add time'}</Text>
                 </View>
               </View>
             </View>
-          )}
+          ) : null}
         </View>
       </ScrollView>
 
@@ -315,16 +324,15 @@ export default function PhotographerCalendarSlotsScreen() {
         }}
         transparent
         visible={isManageModalVisible}>
-        <View style={styles.manageDateScreen}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.manageDateScreen}>
           <StatusBar style="dark" />
-          <Image
-            contentFit="cover"
-            source={require('@/assets/images/admin-calendar-background.png')}
-            style={styles.timeSlotFigmaBackground}
-          />
           <ScrollView
+            accessibilityElementsHidden={isSlotModalVisible || Boolean(pendingDeleteSlot) || Boolean(timeSlotNotice)}
             bounces={false}
             contentContainerStyle={[styles.manageDateContent, { paddingBottom: bottomPadding, paddingTop: insets.top + 4 }]}
+            importantForAccessibility={isSlotModalVisible || pendingDeleteSlot || timeSlotNotice ? 'no-hide-descendants' : 'auto'}
             showsVerticalScrollIndicator={false}>
             <View style={styles.manageDateHeader}>
               <Pressable
@@ -354,12 +362,14 @@ export default function PhotographerCalendarSlotsScreen() {
               <View style={styles.manageStatusOptions}>
                 <AvailabilityOption
                   active={!isSelectedDayClosed}
+                  disabled={Boolean(dayError)}
                   label="Available"
                   onPress={() => updateDayAvailability('available')}
                   tone="available"
                 />
                 <AvailabilityOption
                   active={isSelectedDayClosed}
+                  disabled={Boolean(dayError)}
                   label="Unavailable"
                   onPress={() => updateDayAvailability('unavailable')}
                   tone="unavailable"
@@ -370,11 +380,11 @@ export default function PhotographerCalendarSlotsScreen() {
                 <Text style={styles.manageDateSectionLabel}>Time Slots</Text>
                 <Pressable
                   accessibilityRole="button"
-                  disabled={isSelectedDayClosed}
+                  disabled={isSelectedDayClosed || Boolean(dayError)}
                   onPress={openAddSlotModal}
                   style={({ pressed }) => [
                     styles.manageAddTimeButton,
-                    isSelectedDayClosed && styles.disabledAddTimeButton,
+                    (isSelectedDayClosed || dayError) && styles.disabledAddTimeButton,
                     pressed && !isSelectedDayClosed && { opacity: 0.84 },
                   ]}>
                   <Text style={styles.manageAddTimeText}>+ Add Time Slot</Text>
@@ -384,14 +394,22 @@ export default function PhotographerCalendarSlotsScreen() {
               <View style={styles.manageSlotList}>
                 {visibleSlots.length ? (
                   visibleSlots.map((slot) => (
-                    <View key={slot.id} style={styles.manageSlotCard}>
-                      <ManageClockIcon />
-                      <Text numberOfLines={1} style={styles.manageSlotTime}>{formatCompactSlotTimeRange(slot)}</Text>
+                    <View key={slot.id} style={[styles.manageSlotCard, compactCards && styles.slotCardCompact]}>
+                      <View style={[styles.slotIdentity, compactCards && styles.slotIdentityCompact]}>
+                        <ManageClockIcon />
+                        <View style={styles.manageSlotCopy}>
+                          <Text style={styles.manageSlotTime}>{formatCompactSlotTimeRange(slot)}</Text>
+                          <View style={[styles.figmaStatusPill, getSlotStatusPillStyle(slot.status)]}>
+                            <View style={[styles.figmaStatusPillDot, getSlotStatusDotStyle(slot.status)]} />
+                            <Text style={[styles.figmaStatusPillText, getSlotStatusTextStyle(slot.status)]}>{formatShortSlotStatus(slot)}</Text>
+                          </View>
+                        </View>
+                      </View>
                       <View style={styles.manageSlotActions}>
-                        <Pressable accessibilityLabel="Edit time slot" accessibilityRole="button" hitSlop={8} onPress={() => openEditSlotModal(slot)}>
+                        <Pressable accessibilityLabel="Edit time slot" accessibilityRole="button" disabled={Boolean(dayError)} hitSlop={8} onPress={() => openEditSlotModal(slot)} style={({ pressed }) => [styles.manageSlotActionButton, dayError && { opacity: 0.45 }, pressed && { opacity: 0.72 }]}>
                           <SmallPencilIcon />
                         </Pressable>
-                        <Pressable accessibilityLabel="Delete time slot" accessibilityRole="button" hitSlop={8} onPress={() => openDeleteSlotModal(slot)}>
+                        <Pressable accessibilityLabel="Delete time slot" accessibilityRole="button" disabled={Boolean(dayError)} hitSlop={8} onPress={() => openDeleteSlotModal(slot)} style={({ pressed }) => [styles.manageSlotActionButton, styles.manageSlotDeleteButton, dayError && { opacity: 0.45 }, pressed && { opacity: 0.72 }]}>
                           <DeleteIcon />
                         </Pressable>
                       </View>
@@ -420,8 +438,12 @@ export default function PhotographerCalendarSlotsScreen() {
           </ScrollView>
 
           {isSlotModalVisible ? (
-            <View style={styles.timeEntryOverlay}>
-              <View style={styles.timeEntryCard}>
+            <View
+              accessibilityElementsHidden={Boolean(pendingDeleteSlot) || Boolean(timeSlotNotice)}
+              accessibilityViewIsModal={!pendingDeleteSlot && !timeSlotNotice}
+              importantForAccessibility={pendingDeleteSlot || timeSlotNotice ? 'no-hide-descendants' : 'auto'}
+              style={[styles.timeEntryOverlay, { paddingTop: insets.top + 18, paddingBottom: insets.bottom + 18 }]}>
+              <View style={styles.timeEntryCard}><ScrollView keyboardShouldPersistTaps="handled" style={{ width: '100%', flexShrink: 1 }} contentContainerStyle={styles.timeEntryScrollContent}>
                 <View style={styles.timeEntryHeader}>
                   <Text style={styles.timeEntryTitle}>{editingSlot ? 'Edit Time Slot' : 'Add Time Slot'}</Text>
                   <Pressable
@@ -433,14 +455,17 @@ export default function PhotographerCalendarSlotsScreen() {
                     <CloseIcon />
                   </Pressable>
                 </View>
+                <Text style={styles.timeEntryDate}>{formatFigmaDate(selectedDate)}</Text>
                 <View style={styles.timeEntryFields}>
                   <View style={styles.timeEntryField}>
                     <Text style={[styles.formLabel, styles.timeEntryLabel]}>Start Time</Text>
                     <TextInput
                       accessibilityLabel="Start time"
+                      autoCapitalize="characters"
+                      autoCorrect={false}
                       onChangeText={setStartTimeInput}
                       placeholder="8:00 AM"
-                      placeholderTextColor="#8AA3C3"
+                      placeholderTextColor="#65758B"
                       style={styles.calendarSlotInput}
                       value={startTimeInput}
                     />
@@ -449,29 +474,31 @@ export default function PhotographerCalendarSlotsScreen() {
                     <Text style={[styles.formLabel, styles.timeEntryLabel]}>End Time</Text>
                     <TextInput
                       accessibilityLabel="End time"
+                      autoCapitalize="characters"
+                      autoCorrect={false}
                       onChangeText={setEndTimeInput}
                       placeholder="10:00 AM"
-                      placeholderTextColor="#8AA3C3"
+                      placeholderTextColor="#65758B"
                       style={styles.calendarSlotInput}
                       value={endTimeInput}
                     />
                   </View>
                 </View>
                 <View style={styles.timeEntryActions}>
-                  <Pressable accessibilityRole="button" onPress={() => setIsSlotModalVisible(false)} style={styles.timeEntryCancelButton}>
+                  <Pressable accessibilityRole="button" onPress={() => setIsSlotModalVisible(false)} style={({ pressed }) => [styles.timeEntryCancelButton, pressed && { opacity: 0.72 }]}>
                     <Text style={styles.timeEntryCancelText}>Cancel</Text>
                   </Pressable>
-                  <Pressable accessibilityRole="button" onPress={saveSlotFromModal} style={styles.timeEntrySubmitButton}>
+                  <Pressable accessibilityRole="button" disabled={Boolean(dayError)} onPress={saveSlotFromModal} style={({ pressed }) => [styles.timeEntrySubmitButton, dayError && { opacity: 0.45 }, pressed && { opacity: 0.82 }]}>
                     <Text style={styles.timeEntrySubmitText}>{editingSlot ? 'Update' : 'Add'}</Text>
                   </Pressable>
                 </View>
-              </View>
+              </ScrollView></View>
             </View>
           ) : null}
 
           {pendingDeleteSlot ? (
-            <View style={styles.deleteTimeSlotOverlay}>
-              <View style={styles.deleteTimeSlotCard}>
+            <View accessibilityViewIsModal style={[styles.deleteTimeSlotOverlay, { paddingTop: insets.top + 18, paddingBottom: insets.bottom + 18 }]}>
+              <View style={styles.deleteTimeSlotCard}><ScrollView keyboardShouldPersistTaps="handled" style={{ width: '100%', flexShrink: 1 }} contentContainerStyle={styles.noticeScrollContent}>
                 <Pressable
                   accessibilityLabel="Close delete time slot confirmation"
                   accessibilityRole="button"
@@ -494,19 +521,19 @@ export default function PhotographerCalendarSlotsScreen() {
                   </Pressable>
                   <Pressable
                     accessibilityRole="button"
-                    disabled={isDeletingSlot}
+                    disabled={isDeletingSlot || Boolean(dayError)}
                     onPress={deletePendingSlot}
                     style={({ pressed }) => [styles.deleteTimeSlotDeleteButton, pressed && !isDeletingSlot && { opacity: 0.82 }]}>
                     <Text style={styles.deleteTimeSlotDeleteText}>{isDeletingSlot ? 'Deleting' : 'Delete'}</Text>
                   </Pressable>
                 </View>
-              </View>
+              </ScrollView></View>
             </View>
           ) : null}
 
           {timeSlotNotice ? (
-            <View style={styles.deleteTimeSlotOverlay}>
-              <View style={styles.deleteTimeSlotCard}>
+            <View accessibilityViewIsModal style={[styles.deleteTimeSlotOverlay, { paddingTop: insets.top + 18, paddingBottom: insets.bottom + 18 }]}>
+              <View style={styles.deleteTimeSlotCard}><ScrollView keyboardShouldPersistTaps="handled" style={{ width: '100%', flexShrink: 1 }} contentContainerStyle={styles.noticeScrollContent}>
                 <Pressable
                   accessibilityLabel="Close time slot notice"
                   accessibilityRole="button"
@@ -526,10 +553,10 @@ export default function PhotographerCalendarSlotsScreen() {
                     <Text style={styles.timeSlotNoticeOkText}>OK</Text>
                   </Pressable>
                 </View>
-              </View>
+              </ScrollView></View>
             </View>
           ) : null}
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -537,11 +564,13 @@ export default function PhotographerCalendarSlotsScreen() {
 
 function AvailabilityOption({
   active,
+  disabled,
   label,
   onPress,
   tone,
 }: {
   active: boolean;
+  disabled: boolean;
   label: string;
   onPress: () => void;
   tone: 'available' | 'unavailable';
@@ -549,10 +578,12 @@ function AvailabilityOption({
   return (
     <Pressable
       accessibilityRole="radio"
-      accessibilityState={{ checked: active }}
+      accessibilityState={{ checked: active, disabled }}
+      disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.dayAvailabilityOption,
+        disabled && { opacity: 0.45 },
         active && (tone === 'available' ? styles.activeAvailableOption : styles.activeUnavailableOption),
         pressed && { opacity: 0.84 },
       ]}>
@@ -567,7 +598,7 @@ function AvailabilityOption({
 function normalizeDateParam(value?: string | string[]) {
   const date = Array.isArray(value) ? value[0] : value;
 
-  return date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : getCurrentDateString();
+  return date && isValidCalendarDate(date) ? date : getStudioDateTime().date;
 }
 
 function formatFigmaDate(date: string) {
@@ -703,34 +734,34 @@ function getSlotStatusDotStyle(status: CalendarTimeSlot['status']) {
 
 function BackIcon() {
   return (
-    <Svg width={35} height={35} viewBox="0 0 35 35" fill="none">
-      <Path d="M21.9 7.3L11.7 17.5L21.9 27.7" stroke="#083979" strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} />
+    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+      <Path d="M15 5L8 12L15 19" stroke={adminColors.ink} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} />
     </Svg>
   );
 }
 
 function CalendarIcon() {
   return (
-    <Svg width={28} height={28} viewBox="0 0 24 24" fill="none">
-      <Path d="M7 3.5V6.5M17 3.5V6.5M4.5 9H19.5M6.5 5H17.5C18.6 5 19.5 5.9 19.5 7V18C19.5 19.1 18.6 20 17.5 20H6.5C5.4 20 4.5 19.1 4.5 18V7C4.5 5.9 5.4 5 6.5 5Z" stroke="#083979" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} />
+    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+      <Path d="M7 3.5V6.5M17 3.5V6.5M4.5 9H19.5M6.5 5H17.5C18.6 5 19.5 5.9 19.5 7V18C19.5 19.1 18.6 20 17.5 20H6.5C5.4 20 4.5 19.1 4.5 18V7C4.5 5.9 5.4 5 6.5 5Z" stroke={adminColors.blue} strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} />
     </Svg>
   );
 }
 
 function ClockIcon() {
   return (
-    <Svg width={48} height={48} viewBox="0 0 48 48" fill="none">
-      <Circle cx={24} cy={24} r={24} fill="#E4EEFC" />
-      <Circle cx={24} cy={24} r={11} stroke="#536B86" strokeWidth={3.2} />
-      <Path d="M24 16.4V24L29.2 27" stroke="#536B86" strokeLinecap="round" strokeLinejoin="round" strokeWidth={3.2} />
+    <Svg width={44} height={44} viewBox="0 0 48 48" fill="none">
+      <Circle cx={24} cy={24} r={24} fill={adminColors.blueSoft} />
+      <Circle cx={24} cy={24} r={11} stroke={adminColors.blue} strokeWidth={2.2} />
+      <Path d="M24 16.4V24L29.2 27" stroke={adminColors.blue} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} />
     </Svg>
   );
 }
 
 function PencilIcon() {
   return (
-    <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-      <Path d="M4.4 17.9L5.5 13.5L16.6 2.4C17.6 1.4 19 1.4 20 2.4L21.6 4C22.6 5 22.6 6.4 21.6 7.4L10.5 18.5L6.1 19.6C5 19.9 4.1 19 4.4 17.9Z" fill="#ffffff" />
+    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+      <Path d="M14.5 5.5L18.5 9.5M4.5 19.5L5.5 15.5L16.5 4.5C17.6 3.4 19.4 3.4 20.5 4.5C21.6 5.6 21.6 7.4 20.5 8.5L9.5 19.5L4.5 20.5V19.5Z" stroke={adminColors.surface} strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} />
     </Svg>
   );
 }
@@ -738,36 +769,33 @@ function PencilIcon() {
 function ManageClockIcon() {
   return (
     <Svg width={40} height={40} viewBox="0 0 40 40" fill="none">
-      <Circle cx={20} cy={20} r={20} fill="#E4EEFC" />
-      <Circle cx={20} cy={20} r={9.2} stroke="#536B86" strokeWidth={2.7} />
-      <Path d="M20 13.7V20L24.3 22.5" stroke="#536B86" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.7} />
+      <Circle cx={20} cy={20} r={20} fill={adminColors.blueSoft} />
+      <Circle cx={20} cy={20} r={9.2} stroke={adminColors.blue} strokeWidth={1.8} />
+      <Path d="M20 13.7V20L24.3 22.5" stroke={adminColors.blue} strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} />
     </Svg>
   );
 }
 
 function SmallPencilIcon() {
   return (
-    <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-      <Path d="M4.5 17.8L5.6 13.7L16 3.3C17 2.3 18.5 2.3 19.5 3.3L20.7 4.5C21.7 5.5 21.7 7 20.7 8L10.3 18.4L6.2 19.5C5.1 19.8 4.2 18.9 4.5 17.8Z" fill="#142C4C" />
+    <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+      <Path d="M14.5 5.5L18.5 9.5M4.5 19.5L5.5 15.5L16.5 4.5C17.6 3.4 19.4 3.4 20.5 4.5C21.6 5.6 21.6 7.4 20.5 8.5L9.5 19.5L4.5 20.5V19.5Z" stroke={adminColors.blue} strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} />
     </Svg>
   );
 }
 
 function DeleteIcon() {
   return (
-    <Svg width={30} height={30} viewBox="0 0 30 30" fill="none">
-      <Path d="M8.8 10.3H21.2L20.2 24.2C20.1 25.2 19.3 26 18.2 26H11.8C10.7 26 9.9 25.2 9.8 24.2L8.8 10.3Z" fill="#D71920" />
-      <Path d="M7 7.8H23" stroke="#D71920" strokeLinecap="round" strokeWidth={2.6} />
-      <Path d="M12.3 7.8V5.8C12.3 4.8 13.1 4 14.1 4H15.9C16.9 4 17.7 4.8 17.7 5.8V7.8" stroke="#D71920" strokeLinecap="round" strokeWidth={2.6} />
-      <Path d="M13.1 13.6V22M16.9 13.6V22" stroke="#ffffff" strokeLinecap="round" strokeWidth={1.9} />
+    <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+      <Path d="M4 7H20M9 7V4H15V7M6 7L7 20H17L18 7M10 10V17M14 10V17" stroke={adminColors.red} strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} />
     </Svg>
   );
 }
 
 function DeleteTimeSlotIcon() {
   return (
-    <Svg width={100} height={100} viewBox="0 0 100 100" fill="none">
-      <Circle cx={50} cy={50} r={50} fill="#F5E1E3" />
+    <Svg width={72} height={72} viewBox="0 0 100 100" fill="none">
+      <Circle cx={50} cy={50} r={50} fill={adminColors.redSoft} />
       <Path d="M36 41H64L61.8 72.5C61.6 74.4 60 76 58 76H42C40 76 38.4 74.4 38.2 72.5L36 41Z" fill="#C92228" />
       <Path d="M32 35H68" stroke="#C92228" strokeLinecap="round" strokeWidth={5} />
       <Path d="M44 35V30.5C44 28.5 45.6 27 47.6 27H52.4C54.4 27 56 28.5 56 30.5V35" stroke="#C92228" strokeLinecap="round" strokeWidth={5} />
@@ -778,18 +806,18 @@ function DeleteTimeSlotIcon() {
 
 function TimeSlotNoticeIcon() {
   return (
-    <Svg width={100} height={100} viewBox="0 0 100 100" fill="none">
-      <Circle cx={50} cy={50} r={50} fill="#E5EEF9" />
-      <Path d="M50 28V56" stroke="#142C4C" strokeLinecap="round" strokeWidth={7} />
-      <Circle cx={50} cy={70} r={4.5} fill="#142C4C" />
+    <Svg width={72} height={72} viewBox="0 0 100 100" fill="none">
+      <Circle cx={50} cy={50} r={50} fill={adminColors.blueSoft} />
+      <Path d="M50 28V56" stroke={adminColors.blue} strokeLinecap="round" strokeWidth={7} />
+      <Circle cx={50} cy={70} r={4.5} fill={adminColors.blue} />
     </Svg>
   );
 }
 
 function CloseIcon() {
   return (
-    <Svg width={34} height={34} viewBox="0 0 34 34" fill="none">
-      <Path d="M10.5 10.5L23.5 23.5M23.5 10.5L10.5 23.5" stroke="#142C4C" strokeLinecap="round" strokeWidth={4} />
+    <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+      <Path d="M6 6L18 18M18 6L6 18" stroke={adminColors.ink} strokeLinecap="round" strokeWidth={2} />
     </Svg>
   );
 }

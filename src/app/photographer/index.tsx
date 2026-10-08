@@ -1,15 +1,17 @@
-import { router, useFocusEffect } from 'expo-router';
+import { useBottomNavHeight } from '@/hooks/use-bottom-nav-height';
+import { useClientNavScroll as useNavScroll } from '@/hooks/use-client-nav-scroll';
+import { router } from 'expo-router';
 import { Image } from 'expo-image';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, View, type ImageSourcePropType } from 'react-native';
+import { useCallback } from 'react';
+import { Pressable, RefreshControl, ScrollView, Text, View, useWindowDimensions, type ImageSourcePropType } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path, Rect } from 'react-native-svg';
 
-import { formatBookingTimeRange, getAdminBookingRequests } from '@/services/admin-bookings';
-import { subscribeToBookingsChanged } from '@/services/booking-events';
-import { getMyUnreadNotificationCount } from '@/services/notifications';
-import { bottomNavMetrics } from '@/styles/navigation.styles';
+import { AdminBrandHeader } from '@/components/admin-brand-header';
+import { usePagedAdminBookings } from '@/hooks/use-paged-admin-bookings';
+import { useNotificationUnreadCount } from '@/hooks/use-notification-unread-count';
+import { formatBookingTimeRange, formatShortBookingDate } from '@/services/admin-bookings';
 import { photographerStyles as styles } from '@/styles/photographer.styles';
 import { type AdminBookingRequest } from '@/types/admin-bookings';
 
@@ -22,6 +24,7 @@ type AppointmentItem = {
   service: string;
   status: 'Ongoing' | 'Upcoming';
   time: string;
+  date: string;
 };
 
 const APPOINTMENT_IMAGES = [
@@ -31,31 +34,16 @@ const APPOINTMENT_IMAGES = [
 ];
 
 export default function PhotographerDashboardScreen() {
+  const navHeight = useBottomNavHeight('admin');
+  const navScroll = useNavScroll();
   const insets = useSafeAreaInsets();
-  const [bookings, setBookings] = useState<AdminBookingRequest[]>([]);
-  const [isDashboardLoading, setIsDashboardLoading] = useState(true);
-  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
-  const bottomPadding = bottomNavMetrics.height + insets.bottom + 24;
-  const todayDate = getTodayDate();
-  const pendingRequests = useMemo(
-    () => bookings.filter((booking) => booking.status === 'pending'),
-    [bookings],
-  );
-  const todayAppointments = useMemo(
-    () =>
-      bookings
-        .filter((booking) => booking.status === 'confirmed' && booking.bookingDate === todayDate)
-        .sort((a, b) => a.startTime.localeCompare(b.startTime)),
-    [bookings, todayDate],
-  );
-  const upcomingAppointments = useMemo(
-    () =>
-      bookings
-        .filter((booking) => booking.status === 'confirmed' && booking.bookingDate > todayDate)
-        .sort((a, b) => `${a.bookingDate}-${a.startTime}`.localeCompare(`${b.bookingDate}-${b.startTime}`)),
-    [bookings, todayDate],
-  );
-  const dashboardAppointmentBookings = todayAppointments.length > 0 ? todayAppointments : upcomingAppointments;
+  const { width, fontScale } = useWindowDimensions();
+  const useTwoStatColumns = width / fontScale < 440;
+  const { requests: bookings, counts, error, isLoading: isDashboardLoading, isRefreshing, refresh } = usePagedAdminBookings({ dashboard: true });
+  const { unreadCount: unreadNotificationCount, error: notificationError, isRefreshing: isNotificationRefreshing,
+    refresh: refreshNotificationCount } = useNotificationUnreadCount();
+  const bottomPadding = navHeight + insets.bottom + 24;
+  const dashboardAppointmentBookings = bookings;
   const appointmentCards: AppointmentItem[] = dashboardAppointmentBookings.slice(0, 3).map((booking, index) => ({
     bookingId: booking.id,
     client: booking.clientName,
@@ -63,102 +51,43 @@ export default function PhotographerDashboardScreen() {
     service: booking.packageName,
     status: isOngoingAppointment(booking) ? 'Ongoing' : 'Upcoming',
     time: formatBookingTimeRange(booking.startTime, booking.endTime),
+    date: formatShortBookingDate(booking.bookingDate),
   }));
-  const appointmentSectionTitle = todayAppointments.length > 0 ? "Today's Appointments" : 'Upcoming Appointments';
+  const appointmentSectionTitle = (counts?.today ?? 0) > 0 ? "Today's Appointments" : 'Upcoming Appointments';
   const unreadNotificationCountText = formatNotificationBadgeCount(unreadNotificationCount);
   const displayAppointments = isDashboardLoading ? [] : appointmentCards;
   const stats: { icon: StatIconName; label: string; labelLines: string[]; tone: 'blue' | 'orange' | 'red'; value: string }[] = [
-    { icon: 'request', label: 'Pending Requests', labelLines: ['Pending', 'Requests'], tone: 'orange', value: String(pendingRequests.length) },
-    { icon: 'today', label: "Today's Appointments", labelLines: ["Today's", 'Appointments'], tone: 'blue', value: String(todayAppointments.length) },
-    { icon: 'calendar', label: 'Upcoming Appointments', labelLines: ['Upcoming', 'Appointments'], tone: 'blue', value: String(upcomingAppointments.length) },
-    { icon: 'bell', label: 'New Notification', labelLines: ['New', 'Notification'], tone: 'red', value: String(unreadNotificationCount) },
+    { icon: 'request', label: 'Pending Requests', labelLines: ['Pending', 'Requests'], tone: 'orange', value: counts ? String(counts.pending) : '—' },
+    { icon: 'today', label: "Today's Appointments", labelLines: ["Today's", 'Appointments'], tone: 'blue', value: counts ? String(counts.today) : '—' },
+    { icon: 'calendar', label: 'Upcoming Appointments', labelLines: ['Upcoming', 'Appointments'], tone: 'blue', value: counts ? String(counts.upcoming) : '—' },
+    { icon: 'bell', label: 'New Notification', labelLines: ['New', 'Notification'], tone: 'red', value: unreadNotificationCount === null ? '—' : String(unreadNotificationCount) },
   ];
-  const loadDashboardData = useCallback(async (isMounted: () => boolean = () => true) => {
-    setIsDashboardLoading(true);
-
-    try {
-      const [bookingItems, unreadCount] = await Promise.all([
-        getAdminBookingRequests(),
-        getMyUnreadNotificationCount(),
-      ]);
-
-      if (isMounted()) {
-        setBookings(bookingItems);
-        setUnreadNotificationCount(unreadCount);
-      }
-    } catch {
-      if (isMounted()) {
-        setBookings([]);
-        setUnreadNotificationCount(0);
-      }
-    } finally {
-      if (isMounted()) {
-        setIsDashboardLoading(false);
-      }
-    }
-  }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      let isMounted = true;
-
-      void loadDashboardData(() => isMounted);
-
-      return () => {
-        isMounted = false;
-      };
-    }, [loadDashboardData]),
-  );
-
-  useEffect(
-    () =>
-      subscribeToBookingsChanged(() => {
-        void loadDashboardData();
-      }),
-    [loadDashboardData],
-  );
+  const refreshDashboard = useCallback(() => {
+    void refresh();
+    void refreshNotificationCount();
+  }, [refreshNotificationCount, refresh]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, styles.adminCurvedHeaderScreen]}>
       <StatusBar style="light" />
-      <Image
-        contentFit="cover"
-        source={require('@/assets/images/admin-dashboard-background.png')}
-        style={styles.adminDashboardBackground}
+      <AdminBrandHeader
+        textureSource={require('@/assets/images/admin-calendar-banner.png')}
+        topInset={insets.top}
       />
+      <View style={styles.adminDashboardSurface}>
       <ScrollView
-        bounces={false}
+        {...navScroll}
+        refreshControl={<RefreshControl refreshing={isRefreshing || isNotificationRefreshing} onRefresh={refreshDashboard} />}
         contentContainerStyle={[
           styles.adminDashboardContent,
           { paddingBottom: bottomPadding },
         ]}
         showsVerticalScrollIndicator={false}
         style={styles.scrollView}>
-        <View style={[styles.adminDashboardHeader, { paddingTop: insets.top }]}>
-          <Image
-            contentFit="cover"
-            source={require('@/assets/images/admin-header-texture.png')}
-            style={styles.adminHeaderTexture}
-          />
-          <View style={styles.adminDashboardBrand}>
-            <Text style={styles.adminDashboardBrandText}>PhotoSync</Text>
-            <Image
-              contentFit="contain"
-              source={require('@/assets/images/photosync-logo.png')}
-              style={styles.adminDashboardBrandLogo}
-            />
-          </View>
-        </View>
-
         <View style={styles.adminDashboardHero}>
-          <Image
-            contentFit="contain"
-            source={require('@/assets/images/admin-dashboard-extra.png')}
-            style={styles.adminDashboardHeroImage}
-          />
-          <Text style={styles.adminDashboardGreeting}>Good morning,</Text>
+          <Text style={styles.adminDashboardGreeting}>YOUR STUDIO, AT A GLANCE</Text>
           <View style={styles.adminDashboardGreetingRow}>
-            <Text style={styles.adminDashboardGreetingAccent}>Admin!</Text>
+            <Text style={styles.adminDashboardGreetingAccent}>Overview</Text>
             <Pressable
               accessibilityLabel="Open notifications"
               accessibilityRole="button"
@@ -174,17 +103,20 @@ export default function PhotographerDashboardScreen() {
               ) : null}
             </Pressable>
           </View>
-          <Text style={styles.adminDashboardSubtitle}>See how your business is doing today.</Text>
+          <Text style={styles.adminDashboardSubtitle}>A clear view of your bookings and what’s next.</Text>
         </View>
 
         <View style={styles.adminDashboardStatsRow}>
           {stats.map((stat) => (
             <Pressable
-              accessibilityRole={stat.icon === 'bell' ? 'button' : undefined}
-              disabled={stat.icon !== 'bell'}
+              accessibilityRole="button"
+              accessibilityLabel={`${stat.label}: ${stat.value}`}
               key={stat.label}
-              onPress={() => router.push('/photographer/notifications')}
-              style={({ pressed }) => [styles.adminDashboardStatCard, pressed && { opacity: 0.82 }]}>
+              onPress={() => router.push(stat.icon === 'bell' ? '/photographer/notifications'
+                : stat.icon === 'request' ? '/photographer/requests' : '/photographer/calendar')}
+              style={({ pressed }) => [styles.adminDashboardStatCard,
+                useTwoStatColumns && { flexBasis: '45%', flexGrow: 1, flexShrink: 0 },
+                pressed && { opacity: 0.82 }]}>
               <View
                 style={[
                   styles.adminDashboardStatIconWrap,
@@ -199,22 +131,40 @@ export default function PhotographerDashboardScreen() {
           ))}
         </View>
 
+        {notificationError ? <Text accessibilityRole="alert" style={styles.adminRequestsEmptyText}>{notificationError}</Text> : null}
+
+        {counts ? (
+          <View style={[styles.adminAttentionCard, counts.pending === 0 && styles.adminAttentionCardClear]}>
+            <Text style={styles.adminAttentionEyebrow}>NEEDS ATTENTION</Text>
+            <Text style={styles.adminAttentionTitle}>{counts.pending > 0
+              ? `${counts.pending} ${counts.pending === 1 ? 'request is' : 'requests are'} waiting`
+              : 'You’re all caught up'}</Text>
+            <Text style={styles.adminAttentionDescription}>{counts.pending > 0
+              ? 'Review new requests to help clients plan their session.'
+              : 'No pending requests. Your next sessions are listed below.'}</Text>
+            {counts.pending > 0 ? <Pressable accessibilityRole="button"
+              accessibilityLabel="Review pending booking requests"
+              onPress={() => router.push('/photographer/requests')}
+              style={({ pressed }) => [styles.adminAttentionButton, pressed && { opacity: 0.8 }]}>
+              <Text style={styles.adminAttentionButtonText}>Review requests →</Text>
+            </Pressable> : null}
+          </View>
+        ) : null}
+
         <View style={styles.adminDashboardSectionHeader}>
           <Text style={styles.adminDashboardSectionTitle}>{appointmentSectionTitle}</Text>
           <View style={styles.adminDashboardHeaderActions}>
-            <View style={styles.adminDashboardUpcomingPill}>
-              <Text style={styles.adminDashboardUpcomingText}>Upcoming</Text>
-            </View>
           <Pressable
             accessibilityRole="button"
-            onPress={() => router.push('/photographer/requests')}
+            onPress={() => router.push('/photographer/calendar')}
               style={({ pressed }) => [styles.adminDashboardViewAllButton, pressed && { opacity: 0.7 }]}>
-              <Text style={styles.adminDashboardViewAllText}>View All</Text>
+              <Text style={styles.adminDashboardViewAllText}>View calendar</Text>
           </Pressable>
           </View>
         </View>
 
         <View style={styles.adminDashboardAppointmentList}>
+          {error ? <DashboardAppointmentStateCard text={error} /> : null}
           {isDashboardLoading ? (
             <DashboardAppointmentStateCard text="Loading appointments..." />
           ) : displayAppointments.length > 0 ? (
@@ -225,17 +175,18 @@ export default function PhotographerDashboardScreen() {
                 onPress={() => router.push(`/photographer/requests/${item.bookingId}` as never)}
               />
             ))
-          ) : (
+          ) : !error ? (
             <DashboardAppointmentStateCard text="No upcoming appointments." />
-          )}
+          ) : null}
         </View>
       </ScrollView>
+      </View>
     </View>
   );
 }
 
-function formatNotificationBadgeCount(count: number) {
-  if (count <= 0) {
+function formatNotificationBadgeCount(count: number | null) {
+  if (count === null || count <= 0) {
     return '';
   }
 
@@ -272,14 +223,16 @@ function AppointmentCard({
       style={({ pressed }) => [styles.adminDashboardAppointmentCard, pressed && !item.isSample && { opacity: 0.86 }]}>
       <Image contentFit="cover" source={item.image} style={styles.adminDashboardAppointmentImage} />
       <View style={styles.adminDashboardAppointmentCopy}>
+        <Text style={styles.adminDashboardAppointmentDate}>{item.date}</Text>
         <Text style={styles.adminDashboardAppointmentTime}>{item.time}</Text>
         <Text style={styles.adminDashboardAppointmentService}>{item.service}</Text>
         <Text style={styles.adminDashboardAppointmentClient}>{item.client}</Text>
-      </View>
       <View style={[styles.adminDashboardAppointmentBadge, isOngoing ? styles.ongoingBadge : styles.upcomingBadge]}>
         <Text style={[styles.adminDashboardAppointmentBadgeText, isOngoing ? styles.ongoingText : styles.upcomingText]}>
           {item.status}
         </Text>
+      </View>
+
       </View>
       <ChevronRight />
     </Pressable>

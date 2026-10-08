@@ -2,7 +2,9 @@ import { supabase } from '@/lib/supabase';
 import { getActiveBookingSlotsForDate, type ActiveBookingSlot } from '@/services/booking-availability';
 import { createAuditLog } from '@/services/audit-log';
 import { formatBookingTimeRange } from '@/services/admin-bookings';
-import { fallbackWorkingHoursWindow, getDefaultWorkingHoursWindow } from '@/services/studio-settings';
+import { emitCalendarChanged } from '@/services/calendar-events';
+import { getCalendarDayValidationError, getCalendarSlotValidationError } from '@/services/calendar-date-guards';
+import { fallbackWorkingHoursWindow, getDefaultWorkingHoursWindow, type WorkingHoursWindow } from '@/services/studio-settings';
 import { type CalendarDaySummary, type CalendarGridDay, type CalendarSlotStatus, type CalendarTimeSlot } from '@/types/calendar';
 
 const fullDayUnavailableSlot = { endTime: '23:59:00', startTime: '00:00:00' };
@@ -30,52 +32,29 @@ type AdminTimeSlotRow = {
   status: Extract<CalendarSlotStatus, 'available' | 'unavailable'>;
 };
 
-export async function getCalendarDaySummaries(monthPrefix = getCurrentDateString().slice(0, 7)): Promise<CalendarDaySummary[]> {
+export async function getCalendarDaySummaries(
+  monthPrefix = getCurrentDateString().slice(0, 7),
+  { throwOnError = false }: { throwOnError?: boolean } = {},
+): Promise<CalendarDaySummary[]> {
   if (!supabase) {
+    if (throwOnError) throw new Error('Calendar is not connected yet.');
     return [];
   }
 
-  const startDate = `${monthPrefix}-01`;
-  const endDate = `${monthPrefix}-${String(getDaysInMonth(monthPrefix)).padStart(2, '0')}`;
-
-  const [{ data: bookings }, { data: timeSlots }] = await Promise.all([
-    supabase
-      .from('bookings')
-      .select('id, booking_date')
-      .eq('status', 'confirmed')
-      .gte('booking_date', startDate)
-      .lte('booking_date', endDate),
-    supabase
-      .from('time_slots')
-      .select('slot_date, start_time, end_time, status')
-      .gte('slot_date', startDate)
-      .lte('slot_date', endDate),
-  ]);
-
-  const summaries = new Map<string, CalendarDaySummary>();
-
-  for (const item of bookings ?? []) {
-    const summary = getOrCreateSummary(summaries, item.booking_date as string);
-    summary.hasBooked = true;
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthPrefix) || monthPrefix.startsWith('0000')) {
+    if (throwOnError) throw new Error('Please select a valid calendar month.');
+    return [];
   }
-
-  for (const item of timeSlots ?? []) {
-    const summary = getOrCreateSummary(summaries, item.slot_date as string);
-
-    if (item.status === 'available') {
-      summary.hasAvailable = true;
-    }
-
-    if (item.status === 'unavailable') {
-      summary.hasUnavailable = true;
-
-      if (item.start_time === fullDayUnavailableSlot.startTime && item.end_time === fullDayUnavailableSlot.endTime) {
-        summary.hasFullDayUnavailable = true;
-      }
-    }
+  const { data, error } = await supabase.rpc('get_calendar_day_summaries', { p_month: monthPrefix + '-01' });
+  if (error) {
+    if (throwOnError) throw error;
+    return [];
   }
-
-  return Array.from(summaries.values());
+  return (data ?? []).map((row: { date: string; has_available: boolean; has_booked: boolean;
+    has_full_day_unavailable: boolean; has_unavailable: boolean }) => ({
+    date: row.date, hasAvailable: row.has_available, hasBooked: row.has_booked,
+    hasFullDayUnavailable: row.has_full_day_unavailable, hasUnavailable: row.has_unavailable,
+  }));
 }
 
 export async function getClosedDayCount(monthPrefix = getCurrentDateString().slice(0, 7)) {
@@ -101,26 +80,34 @@ export async function getClosedDayCount(monthPrefix = getCurrentDateString().sli
   return count ?? 0;
 }
 
-export async function getCalendarSlotsForDate(date: string): Promise<CalendarTimeSlot[]> {
-  return getCalendarSlotsForDateByBookingStatus(date, 'confirmed');
+export async function getCalendarSlotsForDate(
+  date: string,
+  { throwOnError = false }: { throwOnError?: boolean } = {},
+): Promise<CalendarTimeSlot[]> {
+  return getCalendarSlotsForDateByBookingStatus(date, 'confirmed', throwOnError);
 }
 
 async function getCalendarSlotsForDateByBookingStatus(
   date: string,
   bookingStatusMode: 'active' | 'confirmed',
+  throwOnError = false,
+  forceSettings = false,
 ): Promise<CalendarTimeSlot[]> {
   if (!supabase) {
+    if (throwOnError) throw new Error('Calendar is not connected yet.');
     return getDefaultSlots([]);
   }
 
-  const [bookedRows, { data: adminRows }] = await Promise.all([
-    getBookingRowsForCalendar(date, bookingStatusMode),
+  const [bookedRows, adminResult] = await Promise.all([
+    getBookingRowsForCalendar(date, bookingStatusMode, throwOnError),
     supabase
       .from('time_slots')
       .select('id, slot_date, start_time, end_time, status, reason')
       .eq('slot_date', date)
       .order('start_time', { ascending: true }),
   ]);
+  if (throwOnError && adminResult.error) throw adminResult.error;
+  const adminRows = adminResult.data;
 
   const bookedSlots = bookedRows.map((booking) => ({
     bookingId: booking.id,
@@ -133,7 +120,8 @@ async function getCalendarSlotsForDateByBookingStatus(
     status: 'booked' as const,
   }));
 
-  const defaultSlotKey = getSlotKeyFromWindow(await getDefaultWorkingHoursWindow());
+  const defaultWindow = await getDefaultWorkingHoursWindow({ throwOnError, force: forceSettings });
+  const defaultSlotKey = getSlotKeyFromWindow(defaultWindow);
   const adminSlots = ((adminRows ?? []) as AdminTimeSlotRow[]).map((slot) => ({
     endTime: slot.end_time,
     id: slot.id,
@@ -149,12 +137,13 @@ async function getCalendarSlotsForDateByBookingStatus(
     return [...bookedSlots, ...adminSlots].sort((a, b) => a.startTime.localeCompare(b.startTime));
   }
 
-  return getDefaultSlots([...bookedSlots, ...adminSlots]);
+  return getDefaultSlots([...bookedSlots, ...adminSlots], defaultWindow);
 }
 
 async function getBookingRowsForCalendar(
   date: string,
   bookingStatusMode: 'active' | 'confirmed',
+  throwOnError = false,
 ): Promise<BookingSlotSource[]> {
   if (bookingStatusMode === 'active') {
     const result = await getActiveBookingSlotsForDate(date);
@@ -163,6 +152,7 @@ async function getBookingRowsForCalendar(
       return result.slots;
     }
 
+    if (throwOnError) throw new Error(result.message);
     return [{ end_time: '23:59:00', id: 'availability-check-failed', start_time: '00:00:00' }];
   }
 
@@ -170,11 +160,13 @@ async function getBookingRowsForCalendar(
     return [];
   }
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('bookings')
     .select('id, client_id, booking_date, start_time, end_time, profiles:client_id(full_name)')
     .eq('booking_date', date)
     .eq('status', 'confirmed');
+
+  if (throwOnError && error) throw error;
 
   return (data ?? []) as unknown as BookingSlotRow[];
 }
@@ -183,12 +175,16 @@ export async function getClientBookableSlotsForDate({
   bufferMinutes = 0,
   date,
   durationMinutes,
+  throwOnError = false,
+  forceSettings = false,
 }: {
   bufferMinutes?: number | null;
   date: string;
   durationMinutes: number;
+  throwOnError?: boolean;
+  forceSettings?: boolean;
 }): Promise<CalendarTimeSlot[]> {
-  const calendarSlots = await getCalendarSlotsForDateByBookingStatus(date, 'active');
+  const calendarSlots = await getCalendarSlotsForDateByBookingStatus(date, 'active', throwOnError, forceSettings);
   const requiredDuration = Math.max(0, Math.round(durationMinutes));
   const requiredBuffer = Math.max(0, Math.round(bufferMinutes ?? 0));
 
@@ -255,6 +251,13 @@ export async function saveCalendarSlot({
     return { message: 'Supabase is not connected yet.', success: false };
   }
 
+  const validationError = getCalendarSlotValidationError(date, startTime, endTime);
+  if (validationError) return { message: validationError, success: false };
+  if (slotId) {
+    const original = await getEditableSavedSlot(slotId);
+    if (!original.success) return original;
+  }
+
   const { data: bookedSlot, error: bookedSlotError } = await supabase
     .from('bookings')
     .select('id, start_time, end_time')
@@ -301,6 +304,9 @@ export async function saveCalendarSlot({
     start_time: startTime,
     status,
   };
+  // Conflict reads may cross the start time or studio midnight. Check again at the write.
+  const currentError = getCalendarSlotValidationError(date, startTime, endTime);
+  if (currentError) return { message: currentError, success: false };
   const query = slotId
     ? supabase.from('time_slots').update(payload).eq('id', slotId)
     : supabase.from('time_slots').upsert(payload, { onConflict: 'slot_date,start_time,end_time' });
@@ -310,6 +316,7 @@ export async function saveCalendarSlot({
     return { message: error.message, success: false };
   }
 
+  emitCalendarChanged(slotId ? undefined : date);
   await createAuditLog({
     action: slotId ? 'calendar.slot_updated' : 'calendar.slot_created',
     entityId: slotId,
@@ -325,10 +332,19 @@ export async function saveCalendarSlot({
   return { success: true };
 }
 
-export async function deleteCalendarSlot(id: string) {
+export async function deleteCalendarSlot(id: string, date?: string) {
   if (!supabase) {
     return { message: 'Supabase is not connected yet.', success: false };
   }
+
+  if (date) {
+    const validationError = getCalendarDayValidationError(date);
+    if (validationError) return { message: validationError, success: false };
+  }
+  const original = await getEditableSavedSlot(id);
+  if (!original.success) return original;
+  const currentError = getCalendarDayValidationError(original.date);
+  if (currentError) return { message: currentError, success: false };
 
   const { error } = await supabase.from('time_slots').delete().eq('id', id);
 
@@ -336,6 +352,7 @@ export async function deleteCalendarSlot(id: string) {
     return { message: error.message, success: false };
   }
 
+  emitCalendarChanged(date);
   await createAuditLog({
     action: 'calendar.slot_deleted',
     entityId: id,
@@ -349,6 +366,9 @@ export async function markCalendarDayUnavailable(date: string) {
   if (!supabase) {
     return { message: 'Supabase is not connected yet.', success: false };
   }
+
+  const validationError = getCalendarDayValidationError(date);
+  if (validationError) return { message: validationError, success: false };
 
   const { data: bookedSlots, error: bookedSlotError } = await supabase
     .from('bookings')
@@ -368,6 +388,8 @@ export async function markCalendarDayUnavailable(date: string) {
     };
   }
 
+  const currentError = getCalendarDayValidationError(date);
+  if (currentError) return { message: currentError, success: false };
   const { error } = await supabase.from('time_slots').upsert(
     {
       end_time: fullDayUnavailableSlot.endTime,
@@ -383,6 +405,7 @@ export async function markCalendarDayUnavailable(date: string) {
     return { message: error.message, success: false };
   }
 
+  emitCalendarChanged(date);
   await createAuditLog({
     action: 'calendar.day_closed',
     entityType: 'calendar_day',
@@ -402,6 +425,9 @@ export async function reopenCalendarDay(date: string) {
     return { message: 'Supabase is not connected yet.', success: false };
   }
 
+  const validationError = getCalendarDayValidationError(date);
+  if (validationError) return { message: validationError, success: false };
+
   const { error } = await supabase
     .from('time_slots')
     .delete()
@@ -414,6 +440,7 @@ export async function reopenCalendarDay(date: string) {
     return { message: error.message, success: false };
   }
 
+  emitCalendarChanged(date);
   await createAuditLog({
     action: 'calendar.day_reopened',
     entityId: date,
@@ -439,6 +466,9 @@ export async function markCalendarSlot({
     return { message: 'Supabase is not connected yet.', success: false };
   }
 
+  const validationError = getCalendarSlotValidationError(date, startTime, endTime);
+  if (validationError) return { message: validationError, success: false };
+
   const overlappingSlot = await findOverlappingSavedTimeSlot({
     date,
     endTime,
@@ -458,6 +488,8 @@ export async function markCalendarSlot({
     };
   }
 
+  const currentError = getCalendarSlotValidationError(date, startTime, endTime);
+  if (currentError) return { message: currentError, success: false };
   const { error } = await supabase
     .from('time_slots')
     .upsert(
@@ -474,6 +506,7 @@ export async function markCalendarSlot({
     return { message: error.message, success: false };
   }
 
+  emitCalendarChanged(date);
   await createAuditLog({
     action: 'calendar.slot_marked',
     entityType: 'time_slot',
@@ -491,6 +524,16 @@ export async function markCalendarSlot({
 
 export function formatSlotTimeRange(slot: Pick<CalendarTimeSlot, 'endTime' | 'startTime'>) {
   return formatBookingTimeRange(slot.startTime, slot.endTime);
+}
+
+async function getEditableSavedSlot(id: string) {
+  if (!supabase) return { message: 'Supabase is not connected yet.', success: false as const };
+  const { data, error } = await supabase.from('time_slots').select('slot_date').eq('id', id).maybeSingle();
+  if (error) return { message: error.message, success: false as const };
+  if (!data) return { message: 'This time slot no longer exists. Refresh the schedule and try again.', success: false as const };
+  const validationError = getCalendarDayValidationError(data.slot_date);
+  if (validationError) return { message: validationError, success: false as const };
+  return { date: data.slot_date as string, success: true as const };
 }
 
 export function addMonthsToMonthPrefix(monthPrefix: string, monthOffset: number) {
@@ -572,9 +615,9 @@ export function getMonthPrefix(date: Date | string) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
-async function getDefaultSlots(savedSlots: CalendarTimeSlot[]) {
+async function getDefaultSlots(savedSlots: CalendarTimeSlot[], workingWindow?: WorkingHoursWindow) {
   const slotsByTime = new Map<string, CalendarTimeSlot>();
-  const defaultWindow = supabase ? await getDefaultWorkingHoursWindow() : fallbackWorkingHoursWindow;
+  const defaultWindow = workingWindow ?? (supabase ? await getDefaultWorkingHoursWindow() : fallbackWorkingHoursWindow);
   const hasCustomAvailableSlots = savedSlots.some((slot) => slot.status === 'available' && slot.isCustom);
 
   if (!hasCustomAvailableSlots) {
@@ -605,26 +648,6 @@ async function getDefaultSlots(savedSlots: CalendarTimeSlot[]) {
 
 function getSlotKeyFromWindow(window: { endTime: string; startTime: string }) {
   return getSlotKey(window.startTime, window.endTime);
-}
-
-function getOrCreateSummary(summaries: Map<string, CalendarDaySummary>, date: string) {
-  const existing = summaries.get(date);
-
-  if (existing) {
-    return existing;
-  }
-
-  const summary = {
-    date,
-    hasAvailable: false,
-    hasBooked: false,
-    hasFullDayUnavailable: false,
-    hasUnavailable: false,
-  };
-
-  summaries.set(date, summary);
-
-  return summary;
 }
 
 function getSlotKey(startTime: string, endTime: string) {
@@ -676,7 +699,9 @@ async function findOverlappingSavedTimeSlot({
   }
 
   const requestedInterval = getIntervalFromTimeRange(startTime, endTime);
-  const defaultWindow = await getDefaultWorkingHoursWindow();
+  let defaultWindow: Awaited<ReturnType<typeof getDefaultWorkingHoursWindow>>;
+  try { defaultWindow = await getDefaultWorkingHoursWindow({ force: true, throwOnError: true }); }
+  catch { return { message: 'Studio working hours could not be verified. Please try again.', success: false as const }; }
   const duplicateSlot = savedSlots?.find((savedSlot) => {
     if (savedSlot.id === ignoredSlotId) {
       return false;

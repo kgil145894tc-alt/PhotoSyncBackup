@@ -6,6 +6,7 @@ export const aboutStyles = StyleSheet.create({
     backgroundColor: '#ffffff',
   },
   topBar: {
+    backgroundColor: '#142C4C',
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'center',
@@ -14,7 +15,7 @@ export const aboutStyles = StyleSheet.create({
     paddingTop: 50,
   },
   topBarTitle: {
-    color: '#142C4C',
+    color: '#ffffff',
     fontFamily: 'Jomolhari',
     fontSize: 22,
     includeFontPadding: false,
@@ -26,7 +27,7 @@ export const aboutStyles = StyleSheet.create({
     width: 40,
   },
   hero: {
-    height: 256,
+    minHeight: 256,
     justifyContent: 'center',
   },
   heroOverlay: {
@@ -34,6 +35,7 @@ export const aboutStyles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     paddingHorizontal: 18,
+    paddingVertical: 28,
   },
   heroEyebrow: {
     color: '#ffffff',
@@ -80,7 +82,7 @@ export const aboutStyles = StyleSheet.create({
   },
   quoteCard: {
     backgroundColor: '#D8E3F2',
-    borderRadius: 10,
+    borderRadius: 16,
     marginBottom: 24,
     padding: 16,
   },
@@ -156,7 +158,7 @@ export const aboutStyles = StyleSheet.create({
   },
   serviceCard: {
     borderColor: '#A9B7CA',
-    borderRadius: 10,
+    borderRadius: 16,
     borderWidth: 1,
     marginBottom: 16,
     overflow: 'hidden',
@@ -165,15 +167,22 @@ export const aboutStyles = StyleSheet.create({
     height: '100%',
     width: '100%',
   },
-  serviceLabel: {
-    color: '#142C4C',
-    fontFamily: 'Jomolhari',
-    fontSize: 20,
-    includeFontPadding: false,
+  serviceLabelBadge: {
+    backgroundColor: '#142C4C',
+    borderRadius: 10,
     left: 12,
-    lineHeight: 30,
+    maxWidth: '90%',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
     position: 'absolute',
     top: 10,
+  },
+  serviceLabel: {
+    color: '#FFFFFF',
+    fontFamily: 'InterSemiBold',
+    fontSize: 18,
+    includeFontPadding: false,
+    lineHeight: 26,
   },
   moreThanPhotos: {
     color: '#142C4C',
@@ -240,7 +249,7 @@ export const aboutStyles = StyleSheet.create({
   contactCard: {
     alignItems: 'center',
     backgroundColor: '#ffffff',
-    borderRadius: 10,
+    borderRadius: 16,
     elevation: 2,
     flexDirection: 'row',
     marginBottom: 12,

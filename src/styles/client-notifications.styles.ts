@@ -52,6 +52,7 @@ export const clientNotificationsStyles = StyleSheet.create({
   },
   filterRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 9,
     marginTop: 17,
   },
@@ -59,18 +60,20 @@ export const clientNotificationsStyles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#CEDFF7',
     borderRadius: 10,
-    height: 32,
+    minHeight: 44,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     justifyContent: 'center',
     shadowColor: 'transparent',
   },
   filterChipAll: {
-    width: 64,
+    minWidth: 64,
   },
   filterChipBookings: {
-    width: 122,
+    minWidth: 64,
   },
   filterChipAnnouncements: {
-    width: 117,
+    minWidth: 64,
   },
   filterChipActive: {
     backgroundColor: '#142C4C',
@@ -105,6 +108,8 @@ export const clientNotificationsStyles = StyleSheet.create({
   sectionHeader: {
     alignItems: 'flex-end',
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
     justifyContent: 'space-between',
     marginBottom: 10,
     paddingHorizontal: 1,
@@ -135,6 +140,7 @@ export const clientNotificationsStyles = StyleSheet.create({
     borderWidth: 1,
     flexDirection: 'row',
     minHeight: 91,
+    paddingVertical: 10,
     paddingLeft: 9,
     paddingRight: 11,
     shadowColor: '#000000',

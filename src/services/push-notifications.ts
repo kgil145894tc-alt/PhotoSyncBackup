@@ -4,81 +4,144 @@ import { router } from 'expo-router';
 import { Platform } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
+import { emitNotificationsChanged } from '@/services/notification-events';
 
 const ANDROID_BOOKING_CHANNEL_ID = 'photosync-bookings';
+let currentPushAccountId: string | null = null;
+let pushAccountGeneration = 0;
 
-type PushTokenRow = {
-  expo_push_token: string;
-  platform: string;
-  user_id: string;
-};
+if (supabase) {
+  supabase.auth.onAuthStateChange((event, session) => {
+    const accountId = session?.user.id ?? null;
+    if (accountId !== currentPushAccountId || event === 'SIGNED_OUT') pushAccountGeneration += 1;
+    currentPushAccountId = accountId;
+    if (event === 'SIGNED_OUT' && Platform.OS !== 'web') {
+      // Clear already-presented notifications and old tap destinations locally.
+      try {
+        Notifications.clearLastNotificationResponse();
+        void Notifications.dismissAllNotificationsAsync().catch(() => {
+          console.warn('Could not dismiss notifications after sign-out.');
+        });
+      } catch {
+        console.warn('Could not dismiss notifications after sign-out.');
+      }
+    }
+  });
+}
+
+type PushNotificationSyncReason =
+  | 'permission-denied'
+  | 'push-token-unavailable'
+  | 'signed-out'
+  | 'supabase-error'
+  | 'supabase-unconfigured'
+  | 'web';
+
+type PushNotificationSyncResult =
+  | {
+      status: 'saved';
+      token: string;
+    }
+  | {
+      message: string;
+      reason: PushNotificationSyncReason;
+      status: 'failed' | 'skipped';
+    };
+
+type PushTokenResult =
+  | {
+      ok: true;
+      token: string;
+    }
+  | {
+      message: string;
+      ok: false;
+      reason: PushNotificationSyncReason;
+      status: 'failed' | 'skipped';
+    };
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
+  handleNotification: async (notification) => {
+    const belongsToAccount = isCurrentAccountNotification(notification);
+    return {
+      shouldPlaySound: belongsToAccount,
+      shouldSetBadge: belongsToAccount,
+      shouldShowBanner: belongsToAccount,
+      shouldShowList: belongsToAccount,
+    };
+  },
 });
 
 export async function syncPushNotificationToken() {
   if (!supabase || Platform.OS === 'web') {
-    return null;
+    return Platform.OS === 'web'
+      ? skippedPushSync('web', 'Push notifications are skipped on web.')
+      : skippedPushSync('supabase-unconfigured', 'Supabase is not configured, so the push token cannot be saved.');
   }
 
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: sessionData, error: userError } = await supabase.auth.getSession();
 
-  if (!userData.user) {
-    return null;
+  if (userError) {
+    return failedPushSync('supabase-error', `Unable to read the signed-in user: ${userError.message}`);
   }
+
+  if (!sessionData.session) {
+    return skippedPushSync('signed-out', 'No signed-in user was found while saving the push token.');
+  }
+  const session = sessionData.session;
+  const generation = pushAccountGeneration;
 
   const token = await getExpoPushToken();
 
-  if (!token) {
-    return null;
+  if (!token.ok) {
+    return {
+      message: token.message,
+      reason: token.reason,
+      status: token.status,
+    } satisfies PushNotificationSyncResult;
   }
 
-  const row: PushTokenRow = {
-    expo_push_token: token,
-    platform: Platform.OS,
-    user_id: userData.user.id,
-  };
+  if (generation !== pushAccountGeneration || currentPushAccountId !== session.user.id) {
+    return skippedPushSync('signed-out', 'The login changed before its push token could be saved.');
+  }
 
-  const { error } = await supabase
-    .from('push_tokens')
-    .upsert(
-      {
-        ...row,
-        last_seen_at: new Date().toISOString(),
-      },
-      { onConflict: 'expo_push_token' },
-    );
+  const { error } = await supabase.rpc('register_my_push_token', {
+    p_expo_push_token: token.token,
+    p_platform: Platform.OS,
+  }).setHeader('Authorization', `Bearer ${session.access_token}`);
+
+  if (generation !== pushAccountGeneration) {
+    return skippedPushSync('signed-out', 'The login changed while saving its push token.');
+  }
 
   if (error) {
     console.warn('Unable to save push token:', error.message);
-    return null;
+    return failedPushSync('supabase-error', `Unable to save push token in Supabase: ${error.message}`);
   }
 
-  return token;
+  return {
+    status: 'saved',
+    token: token.token,
+  } satisfies PushNotificationSyncResult;
 }
 
-export async function removeCurrentPushNotificationToken() {
+export async function removeCurrentPushNotificationToken({ signal }: { signal?: AbortSignal } = {}) {
   if (!supabase || Platform.OS === 'web') {
     return;
   }
 
-  const token = await getExpoPushToken({ requestPermission: false });
+  // Use the existing login session, without asking Expo for a token or permission.
+  const { data, error: sessionError } = await supabase.auth.getSession();
+  if (signal?.aborted) return;
+  if (sessionError) throw new Error(sessionError.message);
+  if (!data.session) return;
 
-  if (!token) {
-    return;
-  }
-
-  const { error } = await supabase.from('push_tokens').delete().eq('expo_push_token', token);
-
-  if (error) {
-    console.warn('Unable to remove push token:', error.message);
-  }
+  // Pin credentials before waiting for the network. A late cleanup must never
+  // unregister the next account (or a new login of the same account).
+  const request = supabase.rpc('unregister_my_push_session')
+    .setHeader('Authorization', `Bearer ${data.session.access_token}`);
+  const { error } = await (signal ? request.abortSignal(signal) : request);
+  if (error) throw new Error(error.message);
 }
 
 export function observePushNotificationResponses() {
@@ -88,18 +151,29 @@ export function observePushNotificationResponses() {
 
   const lastResponse = Notifications.getLastNotificationResponse();
 
-  if (lastResponse?.notification) {
+  if (lastResponse?.notification && isCurrentAccountNotification(lastResponse.notification)) {
+    emitNotificationsChanged();
     redirectFromNotification(lastResponse.notification);
   }
 
   const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+    if (!isCurrentAccountNotification(response.notification)) return;
+    emitNotificationsChanged();
     redirectFromNotification(response.notification);
   });
 
-  return () => subscription.remove();
+  const receivedSubscription = Notifications.addNotificationReceivedListener((notification) => {
+    if (!isCurrentAccountNotification(notification)) return;
+    emitNotificationsChanged();
+  });
+
+  return () => {
+    subscription.remove();
+    receivedSubscription.remove();
+  };
 }
 
-async function getExpoPushToken({ requestPermission = true } = {}) {
+async function getExpoPushToken({ requestPermission = true } = {}): Promise<PushTokenResult> {
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync(ANDROID_BOOKING_CHANNEL_ID, {
       importance: Notifications.AndroidImportance.HIGH,
@@ -117,19 +191,34 @@ async function getExpoPushToken({ requestPermission = true } = {}) {
   }
 
   if (finalStatus !== 'granted') {
-    return null;
+    return skippedPushToken(
+      'permission-denied',
+      'Notification permission was not granted, so no Expo push token was created.',
+    );
   }
 
   const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
 
   if (!projectId) {
-    console.warn('Expo EAS projectId is missing. Run `npx eas-cli@latest init` before testing push notifications.');
-    return null;
+    return failedPushToken(
+      'push-token-unavailable',
+      'Expo EAS projectId is missing. Run `npx eas-cli@latest init` before testing push notifications.',
+    );
   }
 
-  const token = await Notifications.getExpoPushTokenAsync({ projectId });
+  try {
+    const token = await Notifications.getExpoPushTokenAsync({ projectId });
 
-  return token.data;
+    return {
+      ok: true,
+      token: token.data,
+    };
+  } catch (error) {
+    return failedPushToken(
+      'push-token-unavailable',
+      `Expo could not create a push token: ${getErrorMessage(error)}`,
+    );
+  }
 }
 
 function getPermissionStatus(permission: Notifications.NotificationPermissionsStatus) {
@@ -156,4 +245,58 @@ function redirectFromNotification(notification: Notifications.Notification) {
   if (typeof url === 'string' && url.startsWith('/')) {
     router.push(url as never);
   }
+}
+
+function isCurrentAccountNotification(notification: Notifications.Notification) {
+  return currentPushAccountId !== null && notification.request.content.data?.userId === currentPushAccountId;
+}
+
+function failedPushSync(
+  reason: PushNotificationSyncReason,
+  message: string,
+): PushNotificationSyncResult {
+  return {
+    message,
+    reason,
+    status: 'failed',
+  };
+}
+
+function skippedPushSync(
+  reason: PushNotificationSyncReason,
+  message: string,
+): PushNotificationSyncResult {
+  return {
+    message,
+    reason,
+    status: 'skipped',
+  };
+}
+
+function failedPushToken(
+  reason: PushNotificationSyncReason,
+  message: string,
+): PushTokenResult {
+  return {
+    message,
+    ok: false,
+    reason,
+    status: 'failed',
+  };
+}
+
+function skippedPushToken(
+  reason: PushNotificationSyncReason,
+  message: string,
+): PushTokenResult {
+  return {
+    message,
+    ok: false,
+    reason,
+    status: 'skipped',
+  };
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }

@@ -1,0 +1,31 @@
+✔ Dashboard count is cached for 30 seconds, including zero, without downloading inbox messages (1.5289ms)
+✔ Dashboard and both inbox filters share an overlapping count request in either navigation order (5.1767ms)
+✔ Opening Notifications after a dashboard read reuses its count, while inbox reads make the dashboard count fresh (0.9627ms)
+✔ An inbox-owned count query is shared without calling the standalone auth/reminder count API (0.4011ms)
+✔ Count failures retain a known count; initial failures stay unknown and can be retried (0.635ms)
+✔ Push invalidation rereads a pending count and discards both obsolete results and obsolete failures (2.2452ms)
+✔ A slow inbox page cannot overwrite a newer badge count or extend the old count freshness (1.2844ms)
+✔ Mark all updates the shared badge only after confirmation, and an older count cannot undo it (1.1036ms)
+✔ Individual reads update the badge; failed writes preserve it and post-write reconciliation counts new arrivals (0.5199ms)
+✔ Logout and account changes clear the badge and discard old requests without disrupting a new one (1.2172ms)
+✔ Unrestored sessions and logout before queued work prevent count queries; late inbox callbacks cannot query another account (0.9778ms)
+✔ Badge hook reads cache during render, refreshes on focused events and resume, and removes listeners on blur (18.2646ms)
+✔ A dashboard retained during a notification write sees the confirmed badge immediately and clears it on logout (8.26ms)
+✔ Badge focus waits for an outstanding read action, then reconciles notifications arriving after mark all (9.3867ms)
+✔ Dashboard bell and stat use the shared count, disappear after mark all, and cap the badge at 99+ (58.1017ms)
+✔ Dashboard pull refreshes bookings and the count and keeps its spinner active while only the count is pending (55.3022ms)
+✔ Dashboard shows an unknown initial count rather than a false zero, and exposes refresh errors while retaining a known badge (40.2947ms)
+✔ Client Home uses the shared inbox count on fresh visits and reads only the count after 30 seconds (44.8895ms)
+✔ Client Home announces the actual unread count, caps the badge at 99+, and preserves notification navigation (40.6126ms)
+✔ Client Home follows individual and bulk read acceptance immediately, while refused writes preserve its badge (38.2287ms)
+✔ Client Home retains a known badge on count failure and its error-only retry recovers without reloading highlights or inbox pages (35.9985ms)
+✔ Focused client Home updates on push, booking events and stale resume, then stops refreshing after blur (37.0332ms)
+✔ Client Home clears on logout and an old pending count cannot appear for the next account (31.6507ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 872.6601

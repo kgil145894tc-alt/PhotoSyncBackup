@@ -1,29 +1,31 @@
 import { Stack, usePathname } from 'expo-router';
-import { View } from 'react-native';
+import { Platform, View } from 'react-native';
 
 import { BottomNav } from '@/components/bottom-nav';
-import { useProtectedRole } from '@/hooks/use-auth-routing';
+import { ClientNavScrollProvider } from '@/components/client-nav-scroll-provider';
+import { PushNotificationBootstrap } from '@/components/push-notification-bootstrap';
 import { isBottomNavVisible } from '@/navigation/tab-navigation';
 import { bottomNavStyles } from '@/styles/navigation.styles';
+import { TabScreenMotion } from '@/components/tab-screen-motion';
+import { useReducedMotionPreference } from '@/hooks/use-reduced-motion-preference';
+import { getScreenMotionOptions, isMainTabScreen } from '@/navigation/screen-motion';
+
+export const unstable_settings = { initialRouteName: 'home' };
 
 export default function ClientLayout() {
   const pathname = usePathname();
-  const isCheckingRole = useProtectedRole('client');
   const showBottomNav = isBottomNavVisible(pathname);
-
-  if (isCheckingRole) {
-    return null;
-  }
+  const reduceMotion = useReducedMotionPreference();
 
   return (
-    <View style={bottomNavStyles.appShell}>
+    <ClientNavScrollProvider><View style={bottomNavStyles.appShell}>
+      <PushNotificationBootstrap />
       <Stack
-        screenOptions={{
-          animation: 'none',
-          headerShown: false,
-        }}
+        screenOptions={({ route }) => getScreenMotionOptions(route.name, 'client', reduceMotion, Platform.OS)}
+        screenLayout={({ route, children }) => <TabScreenMotion
+          enabled={!reduceMotion && isMainTabScreen(route.name, 'client')}>{children}</TabScreenMotion>}
       />
       {showBottomNav ? <BottomNav /> : null}
-    </View>
+    </View></ClientNavScrollProvider>
   );
 }

@@ -7,7 +7,7 @@ import { createClientBookingStatusNotification } from '@/services/notifications'
 import { getDefaultWorkingHoursWindow } from '@/services/studio-settings';
 import { type AdminBookingRequest, type BookingStatus } from '@/types/admin-bookings';
 
-type BookingRow = {
+export type BookingRow = {
   booking_date: string;
   client_id: string;
   contact_email: string | null;
@@ -52,46 +52,12 @@ type BookingConfirmationRow = {
   start_time: string;
 };
 
-export async function getAdminBookingRequests(): Promise<AdminBookingRequest[]> {
+export async function getAdminBookingRequest(
+  id: string,
+  { throwOnError = false }: { throwOnError?: boolean } = {},
+): Promise<AdminBookingRequest | null> {
   if (!supabase) {
-    return [];
-  }
-
-  await expirePastPendingBookings();
-
-  const { data, error } = await supabase
-    .from('bookings')
-    .select(`
-      id,
-      client_id,
-      contact_name,
-      contact_email,
-      contact_phone,
-      booking_date,
-      start_time,
-      end_time,
-      status,
-      notes,
-      people_count,
-      shoot_location,
-      session_theme,
-      special_requests,
-      rejection_reason,
-      profiles:client_id(avatar_url, full_name, phone, email),
-      services:service_id(name),
-      packages:package_id(name, price, inclusions, image_url)
-    `)
-    .order('created_at', { ascending: false });
-
-  if (error || !data) {
-    return [];
-  }
-
-  return (data as unknown as BookingRow[]).map(mapBookingRow);
-}
-
-export async function getAdminBookingRequest(id: string): Promise<AdminBookingRequest | null> {
-  if (!supabase) {
+    if (throwOnError) throw new Error('Bookings are not connected yet.');
     return null;
   }
 
@@ -122,6 +88,7 @@ export async function getAdminBookingRequest(id: string): Promise<AdminBookingRe
     .eq('id', id)
     .maybeSingle();
 
+  if (error && throwOnError) throw error;
   if (error || !data) {
     return null;
   }
@@ -138,7 +105,8 @@ export async function updateAdminBookingStatus(
     return { message: 'Supabase is not connected yet.', success: false };
   }
 
-  await expirePastPendingBookings();
+  const expiration = await expirePastPendingBookings({ force: true });
+  if (!expiration.success) return { success: false, message: expiration.message };
 
   if (status === 'confirmed') {
     const availability = await validateAdminConfirmationAvailability(id);
@@ -226,7 +194,7 @@ export async function updateAdminBookingStatus(
 
   emitBookingsChanged();
 
-  return { success: true };
+  return { success: true, booking };
 }
 
 async function validateAdminConfirmationAvailability(id: string) {
@@ -350,9 +318,11 @@ async function checkAdminConfirmationAvailability({
     endTime: slot.end_time as string,
     startTime: slot.start_time as string,
   }));
-  const availabilityWindowsToCheck = customAvailabilityWindows.length
-    ? customAvailabilityWindows
-    : [await getDefaultWorkingHoursWindow()];
+  let availabilityWindowsToCheck = customAvailabilityWindows;
+  if (!availabilityWindowsToCheck.length) {
+    try { availabilityWindowsToCheck = [await getDefaultWorkingHoursWindow({ force: true, throwOnError: true })]; }
+    catch { return { message: 'Studio working hours could not be verified. Please try again.', success: false }; }
+  }
   const fitsAvailabilityWindow = availabilityWindowsToCheck.some((window) => {
     const windowStart = getTimeMinutes(window.startTime);
     const windowEnd = getTimeMinutes(window.endTime);
@@ -412,7 +382,7 @@ export function formatBookingTimeRange(startTime: string, endTime: string) {
   return `${formatBookingTime(startTime)} - ${formatBookingTime(endTime)}`;
 }
 
-function mapBookingRow(row: BookingRow): AdminBookingRequest {
+export function mapBookingRow(row: BookingRow): AdminBookingRequest {
   const notesDetails = parseBookingNotes(row.notes);
 
   return {

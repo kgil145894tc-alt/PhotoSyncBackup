@@ -1,0 +1,28 @@
+✔ Services and packages share a 60-second snapshot, including an empty database; pull bypasses freshness (4.3802ms)
+✔ Focus, resume, mutation reconciliation and manual pulls share one pending fetch (218.4341ms)
+✔ Save events while the screen is closed invalidate the next visit (8.35ms)
+✔ A save during a pending read discards both old lists and rereads the catalog (19.7117ms)
+✔ Read failures preserve both lists and allow retry; initial failures stay errors rather than samples (7.7276ms)
+✔ Confirmed deletions update cached visibility and package counts even if reconciliation fails (2.8715ms)
+✔ Logout and account switching reject old results without stopping the new account request (28.0092ms)
+✔ Render and an unresolved session do not fetch; logout cancels queued work (0.4579ms)
+✔ Singleton listens to edits while screens are absent and clears the catalog on auth changes (136.9272ms)
+✔ Hook reuses cached lists immediately; refresh work starts on focus and listeners clean up on blur (40.9838ms)
+✔ Mounted ref becomes active only after commit and cancels late async UI completions (29.9362ms)
+✔ Confirmed archives remove admin records immediately and a failed reconciliation cannot restore them (1.6948ms)
+✔ Delete confirmation uses the archive API for inactive services as well as active ones (850.1466ms)
+✔ An inactive-only catalog remains visible to admins with an edit path to reactivation (339.511ms)
+✔ Deactivation keeps the selected service and inactive packages accessible after catalog reconciliation (265.6025ms)
+✔ Category and package views retain cached cards during updates, and switching views makes no direct fetch (360.0044ms)
+✔ Large admin catalogs virtualize categories and packages while retaining counts and offscreen edit/delete actions (294.4632ms)
+✔ Initial errors do not invent empty/sample catalogs; a successful empty catalog shows the add-category state (283.6134ms)
+✔ Account scope resets open forms and service selection through the content key (245.2956ms)
+✔ Delete completion after navigation makes no local state updates or alerts (161.6094ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5525.0558

@@ -1,76 +1,56 @@
 import { supabase } from '@/lib/supabase';
-import { createBookingStatusHistory } from '@/services/booking-status-history';
+import { createBookingExpirationCoordinator, type BookingExpirationOptions, type BookingExpirationResult } from '@/services/booking-expiration-coordinator';
+import { emitBookingsChanged, subscribeToBookingsChanged } from '@/services/booking-events';
 
-type ExpiredBookingRow = {
-  booking_date: string;
-  end_time: string;
-  id: string;
-  start_time: string;
-};
+let publishingExpiration = false;
+let isSessionReady = false;
+let authRevision = 0;
+let initialSession: Promise<void> | null = null;
 
-export async function expirePastPendingBookings() {
-  if (!supabase) {
-    return;
-  }
+const coordinator = createBookingExpirationCoordinator(async (_accountId, isCurrent) => {
+  if (!supabase || !isCurrent()) throw new Error('Your booking session changed. Please sign in again.');
+  const { data, error } = await supabase.rpc('expire_past_pending_bookings');
+  if (error) throw new Error('Couldn’t verify booking status. Please try again.');
+  return data as number;
+}, Date.now, () => {
+  // Invalidate booking data once without invalidating our just-finished check.
+  publishingExpiration = true;
+  try { emitBookingsChanged(); } finally { publishingExpiration = false; }
+});
 
-  const today = getCurrentDateString();
-  const currentTime = getCurrentTimeString();
-  const [pastDateResult, todayResult] = await Promise.all([
-    supabase
-      .from('bookings')
-      .update({ status: 'expired' })
-      .eq('status', 'pending')
-      .lt('booking_date', today)
-      .select('id, booking_date, start_time, end_time'),
-    supabase
-      .from('bookings')
-      .update({ status: 'expired' })
-      .eq('status', 'pending')
-      .eq('booking_date', today)
-      .lt('start_time', currentTime)
-      .select('id, booking_date, start_time, end_time'),
-  ]);
+subscribeToBookingsChanged(() => { if (!publishingExpiration) coordinator.invalidate(); });
 
-  const expiredBookings = [
-    ...((pastDateResult.data ?? []) as ExpiredBookingRow[]),
-    ...((todayResult.data ?? []) as ExpiredBookingRow[]),
-  ];
-
-  if (pastDateResult.error || todayResult.error || expiredBookings.length === 0) {
-    return;
-  }
-
-  await Promise.all(
-    expiredBookings.map((booking) =>
-      createBookingStatusHistory({
-        bookingId: booking.id,
-        metadata: {
-          bookingDate: booking.booking_date,
-          endTime: booking.end_time,
-          expiredAt: new Date().toISOString(),
-          startTime: booking.start_time,
-        },
-        reason: 'Booking request expired after the scheduled start time passed.',
-        status: 'expired',
-      }),
-    ),
-  );
+if (supabase) {
+  supabase.auth.onAuthStateChange((_event, session) => {
+    authRevision += 1;
+    isSessionReady = true;
+    coordinator.setAccount(session?.user.id ?? null);
+  });
 }
 
-function getCurrentDateString() {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const day = String(today.getDate()).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
+async function ensureSessionScope() {
+  if (isSessionReady || !supabase) return;
+  if (!initialSession) {
+    const version = authRevision;
+    const task = Promise.resolve().then(async () => {
+      const { data, error } = await supabase!.auth.getSession();
+      if (version !== authRevision) return;
+      if (error) throw new Error('Please sign in again before checking bookings.');
+      coordinator.setAccount(data.session?.user.id ?? null);
+      isSessionReady = true;
+    }).finally(() => { if (initialSession === task) initialSession = null; });
+    initialSession = task;
+  }
+  await initialSession;
 }
 
-function getCurrentTimeString() {
-  const now = new Date();
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  const seconds = String(now.getSeconds()).padStart(2, '0');
-
-  return `${hours}:${minutes}:${seconds}`;
+export async function expirePastPendingBookings(options: BookingExpirationOptions = {}): Promise<BookingExpirationResult> {
+  if (!supabase) return { success: false, message: 'Bookings are not connected yet.' };
+  if (options.isSessionCurrent?.() === false) return { success: false, message: 'Your booking session changed. Please sign in again.' };
+  try {
+    await ensureSessionScope();
+    return await coordinator.run(options);
+  } catch {
+    return { success: false, message: 'Couldn’t verify booking status. Please try again.' };
+  }
 }

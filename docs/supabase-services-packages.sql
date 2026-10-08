@@ -1,6 +1,9 @@
 alter table public.services
 add column if not exists slug text;
 
+alter table public.services add column if not exists archived_at timestamptz;
+alter table public.packages add column if not exists archived_at timestamptz;
+
 alter table public.packages
 add column if not exists badge text;
 
@@ -58,7 +61,7 @@ values
   ('graduation-photography', 'Graduation Photography', 'Capture the moments behind your achievement.', 90, 30, 3, 1000, true),
   ('family-photography', 'Family Photography', 'Meaningful portraits with the people you love.', 90, 30, 2, 900, true),
   ('videography', 'Videography', 'Relive your special moments through film.', 120, 30, 3, 1200, true)
-on conflict (slug) do update set
+on conflict (slug) where archived_at is null do update set
   name = excluded.name,
   description = excluded.description,
   duration_minutes = excluded.duration_minutes,
@@ -68,7 +71,7 @@ on conflict (slug) do update set
   is_active = excluded.is_active;
 
 with portrait_service as (
-  select id from public.services where slug = 'portrait-photography'
+  select id from public.services where slug = 'portrait-photography' and archived_at is null
 )
 insert into public.packages (service_id, name, badge, price, inclusions, is_active)
 select
@@ -87,7 +90,7 @@ cross join (
     ('Group Portrait Package', null, 1850::numeric, array['1-2 hours session', 'Individual Shots', '10 printed photos', '20 edited photos', 'Soft copy (high resolution)']),
     ('Premium Portrait Package', null, 2000::numeric, array['2-3 hours session', '30 edited photos', '20 printed photos', '1 album', '15 poses', 'Soft copy (high resolution)'])
 ) as package_data(name, badge, price, inclusions)
-on conflict (service_id, name) do update set
+on conflict (service_id, name) where archived_at is null do update set
   badge = excluded.badge,
   price = excluded.price,
   inclusions = excluded.inclusions,

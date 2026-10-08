@@ -1,0 +1,1 @@
+select exists(select 1 from information_schema.columns where table_schema='public' and table_name='push_tokens' and column_name='session_id') as session_column_present, to_regprocedure('public.unregister_my_push_session()') is not null as cleanup_function_present, to_regprocedure('public.get_active_push_tokens_for_user(uuid)') is not null as delivery_function_present;

@@ -7,3 +7,13 @@ export type PhotoSyncNotification = {
   title: string;
   userId: string;
 };
+
+export type NotificationFilter = 'all' | 'unread';
+export type NotificationCursor = Pick<PhotoSyncNotification, 'createdAt' | 'id'>;
+
+export type NotificationInbox = {
+  items: PhotoSyncNotification[];
+  hasMore: boolean;
+  unreadCount: number;
+  nextCursor?: NotificationCursor | null;
+};

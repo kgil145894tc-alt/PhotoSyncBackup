@@ -6,36 +6,9 @@ import { emitBookingsChanged } from '@/services/booking-events';
 import { createBookingStatusHistory } from '@/services/booking-status-history';
 import { createAdminBookingCancelledNotifications, createAdminBookingRescheduledNotifications } from '@/services/notifications';
 import { getDefaultWorkingHoursWindow } from '@/services/studio-settings';
-import { type AdminBookingRequest, type BookingStatus } from '@/types/admin-bookings';
+import { type BookingStatus } from '@/types/admin-bookings';
 import { type BookingSchedule } from '@/types/booking';
 import { type PackageCatalogItem } from '@/types/services';
-
-type ClientBookingRow = {
-  booking_date: string;
-  client_id: string;
-  contact_email: string | null;
-  contact_name: string | null;
-  contact_phone: string | null;
-  end_time: string;
-  id: string;
-  notes: string | null;
-  packages: {
-    image_url: string | null;
-    inclusions: string[] | null;
-    name: string;
-    price: number;
-  } | null;
-  services: {
-    name: string;
-  } | null;
-  people_count: string | null;
-  rejection_reason: string | null;
-  session_theme: string | null;
-  shoot_location: string | null;
-  special_requests: string | null;
-  start_time: string;
-  status: BookingStatus;
-};
 
 type CancelBookingRow = {
   id: string;
@@ -79,72 +52,28 @@ type RescheduleBookingRow = {
   } | null;
 };
 
-export async function getClientBookings(): Promise<AdminBookingRequest[]> {
-  if (!supabase) {
-    return [];
-  }
+type ClientBookingSessionOptions = {
+  expectedAccountId?: string;
+  isSessionCurrent?: () => boolean;
+};
 
-  const { data: userData } = await supabase.auth.getUser();
-
-  if (!userData.user) {
-    return [];
-  }
-
-  await expirePastPendingBookings();
-
-  const { data, error } = await supabase
-    .from('bookings')
-    .select(`
-      id,
-      client_id,
-      contact_name,
-      contact_email,
-      contact_phone,
-      booking_date,
-      start_time,
-      end_time,
-      status,
-      notes,
-      people_count,
-      shoot_location,
-      session_theme,
-      special_requests,
-      rejection_reason,
-      services:service_id(name),
-      packages:package_id(name, price, inclusions, image_url)
-    `)
-    .eq('client_id', userData.user.id)
-    .order('created_at', { ascending: false });
-
-  if (error || !data) {
-    return [];
-  }
-
-  return (data as unknown as ClientBookingRow[]).map(mapClientBookingRow);
-}
-
-export async function getLatestClientBooking(): Promise<AdminBookingRequest | null> {
-  const bookings = await getClientBookings();
-
-  if (bookings.length === 0) {
-    return null;
-  }
-
-  return bookings[0];
-}
-
-export async function cancelClientBooking(id: string) {
+export async function cancelClientBooking(id: string, { expectedAccountId, isSessionCurrent }: ClientBookingSessionOptions = {}) {
   if (!supabase) {
     return { message: 'Supabase is not connected yet.', success: false };
   }
 
+  const sessionChanged = { success: false, message: 'Your session changed. Please sign in again before cancelling.' };
+  if (isSessionCurrent?.() === false) return sessionChanged;
   const { data: userData } = await supabase.auth.getUser();
+  if (isSessionCurrent?.() === false || (expectedAccountId && expectedAccountId !== userData.user?.id)) return sessionChanged;
 
   if (!userData.user) {
     return { message: 'Please log in again before cancelling your booking.', success: false };
   }
 
-  await expirePastPendingBookings();
+  const expiration = await expirePastPendingBookings({ force: true, expectedAccountId: userData.user.id, isSessionCurrent });
+  if (isSessionCurrent?.() === false) return sessionChanged;
+  if (!expiration.success) return { success: false, message: expiration.message };
 
   const { data, error } = await supabase
     .from('bookings')
@@ -185,18 +114,23 @@ export async function cancelClientBooking(id: string) {
   return { success: true };
 }
 
-export async function getClientReschedulePackage(id: string): Promise<{ message?: string; packageItem?: PackageCatalogItem; success: boolean }> {
+export async function getClientReschedulePackage(id: string, { expectedAccountId, isSessionCurrent }: ClientBookingSessionOptions = {}): Promise<{ message?: string; packageItem?: PackageCatalogItem; success: boolean }> {
   if (!supabase) {
     return { message: 'Supabase is not connected yet.', success: false };
   }
 
+  const sessionChanged = { success: false, message: 'Your session changed. Please sign in again before rescheduling.' };
+  if (isSessionCurrent?.() === false) return sessionChanged;
   const { data: userData } = await supabase.auth.getUser();
+  if (isSessionCurrent?.() === false || (expectedAccountId && expectedAccountId !== userData.user?.id)) return sessionChanged;
 
   if (!userData.user) {
     return { message: 'Please log in again before rescheduling your booking.', success: false };
   }
 
-  await expirePastPendingBookings();
+  const expiration = await expirePastPendingBookings({ force: true, expectedAccountId: userData.user.id, isSessionCurrent });
+  if (isSessionCurrent?.() === false) return sessionChanged;
+  if (!expiration.success) return { success: false, message: expiration.message };
 
   const { data, error } = await supabase
     .from('bookings')
@@ -259,7 +193,8 @@ export async function rescheduleClientBooking(id: string, schedule: BookingSched
     return { message: 'Please log in again before rescheduling your booking.', success: false };
   }
 
-  await expirePastPendingBookings();
+  const expiration = await expirePastPendingBookings({ force: true, expectedAccountId: userData.user.id });
+  if (!expiration.success) return { success: false, message: expiration.message };
 
   const { data: bookingData, error: bookingLoadError } = await supabase
     .from('bookings')
@@ -357,73 +292,6 @@ export async function rescheduleClientBooking(id: string, schedule: BookingSched
   return { success: true };
 }
 
-function mapClientBookingRow(row: ClientBookingRow): AdminBookingRequest {
-  const notesDetails = parseBookingNotes(row.notes);
-
-  return {
-    bookingDate: row.booking_date,
-    clientEmail: row.contact_email ?? '',
-    clientId: row.client_id,
-    clientName: row.contact_name ?? '',
-    clientPhone: row.contact_phone ?? '',
-    contactEmail: row.contact_email ?? '',
-    contactName: row.contact_name ?? '',
-    contactPhone: row.contact_phone ?? '',
-    endTime: row.end_time,
-    id: row.id,
-    notes: row.notes,
-    packageInclusions: row.packages?.inclusions ?? [],
-    packageImageUrl: row.packages?.image_url,
-    packageName: row.packages?.name ?? 'Package',
-    packagePrice: Number(row.packages?.price ?? 0),
-    peopleCount: row.people_count ?? notesDetails.peopleCount,
-    rejectionReason: row.rejection_reason,
-    serviceName: row.services?.name ?? 'Service',
-    sessionTheme: row.session_theme ?? notesDetails.sessionTheme,
-    shootLocation: row.shoot_location ?? notesDetails.shootLocation,
-    specialRequests: row.special_requests ?? notesDetails.specialRequests,
-    startTime: row.start_time,
-    status: row.status,
-  };
-}
-
-function parseBookingNotes(notes: string | null) {
-  const details = {
-    peopleCount: '',
-    sessionTheme: '',
-    shootLocation: '',
-    specialRequests: '',
-  };
-
-  if (!notes?.trim()) {
-    return details;
-  }
-
-  notes.split('\n').forEach((line) => {
-    const [rawLabel, ...valueParts] = line.split(':');
-    const value = valueParts.join(':').trim();
-    const label = rawLabel.trim().toLowerCase();
-
-    if (label === 'shoot location') {
-      details.shootLocation = value;
-    }
-
-    if (label === 'theme / concept') {
-      details.sessionTheme = value;
-    }
-
-    if (label === 'number of people') {
-      details.peopleCount = value;
-    }
-
-    if (label === 'special requests') {
-      details.specialRequests = value;
-    }
-  });
-
-  return details;
-}
-
 async function checkRescheduleAvailability({
   bookingDate,
   bufferMinutes,
@@ -481,7 +349,9 @@ async function checkRescheduleAvailability({
     end: selectedAppointment.end + bufferMinutes,
     start: Math.max(0, selectedAppointment.start - bufferMinutes),
   };
-  const defaultAvailabilityWindow = await getDefaultWorkingHoursWindow();
+  let defaultAvailabilityWindow: Awaited<ReturnType<typeof getDefaultWorkingHoursWindow>>;
+  try { defaultAvailabilityWindow = await getDefaultWorkingHoursWindow({ force: true, throwOnError: true }); }
+  catch { return { message: 'Studio working hours could not be verified. Please try again.', success: false as const }; }
   const availabilityWindows = [
     defaultAvailabilityWindow,
     ...(availableWindows ?? []).map((slot) => ({

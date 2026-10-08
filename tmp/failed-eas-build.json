@@ -1,0 +1,49 @@
+{
+  "id": "6d711126-4c0b-46e1-95b4-2c0c51b4efc4",
+  "status": "ERRORED",
+  "platform": "ANDROID",
+  "error": {
+    "errorCode": "EAS_BUILD_UNKNOWN_GRADLE_ERROR",
+    "message": "Gradle build failed with unknown error. See logs for the \"Run gradlew\" phase for more information."
+  },
+  "artifacts": {},
+  "fingerprint": {
+    "id": "01a1176f-821d-78fe-b313-6b3f6df6bee5",
+    "hash": "354178c4006b372d8a9ac79e78f810e26f957b46"
+  },
+  "initiatingActor": {
+    "id": "d12279a8-419c-4048-bf87-3be79a115102",
+    "displayName": "kirl123"
+  },
+  "logFiles": [
+    "https://storage.googleapis.com/eas-workflows-production/logs/5215d237-41b0-4947-a79f-e537bb73f7a2/6d711126-4c0b-46e1-95b4-2c0c51b4efc4/2026-10-08T02%3A00%3A16Z-15f83c84-6c7e-44e2-9a8a-5b325c5310fe.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20261008%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20261008T021350Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=727a60a67f14d46a52776ec6b77349162f596a9e120f4d0aaf9bfa01a9b2d676ad87b5c8be3266d27cdeb61aa2bab5c1ae0d61b51bc355606c19fd44954e1b2ea4531b8c766f8d5bcd324c73da60e4d6f6c2bee25ef515ffa410954a4b171137a435f27c028d1c465fd6ccd9eab601a79b77133dd9ac56ad13ae3745417724476f4f33b9771cb3c0b8636716a4b2d21d77783a6b95a3f18e016e97250d6918c2b89a516050e9a83a12ef365f6c4bd1524a5c76177596df603236853c62404cdcf75650d2f63263acb63c9133aeaa5daeb2f9e1a63c967af924f00ca32cdaed4bc08caa0b9b85413bbbdac91cdf3b4ba98a140eb577e6119ac69406cca5006d19"
+  ],
+  "app": {
+    "id": "5215d237-41b0-4947-a79f-e537bb73f7a2",
+    "name": "PhotoSync",
+    "slug": "PhotoSync",
+    "ownerAccount": {
+      "id": "85c37752-987f-444b-a717-b531d148d87f",
+      "name": "kirl123"
+    }
+  },
+  "distribution": "INTERNAL",
+  "buildProfile": "preview",
+  "appIdentifier": "com.kirl123.PhotoSync",
+  "sdkVersion": "57.0.0",
+  "appVersion": "1.0.0",
+  "appBuildVersion": "1",
+  "gitCommitHash": "7c3037fbb044540dfeaf3b46642edf42005ad657",
+  "gitCommitMessage": "Update",
+  "priority": "NORMAL",
+  "createdAt": "2026-10-08T02:00:11.668Z",
+  "updatedAt": "2026-10-08T02:11:05.673Z",
+  "completedAt": "2026-10-08T02:11:05.490Z",
+  "expirationDate": "2026-10-22T02:00:11.711Z",
+  "isForIosSimulator": false,
+  "metrics": {
+    "buildWaitTime": 2744,
+    "buildQueueTime": 6616,
+    "buildDuration": 644462
+  }
+}

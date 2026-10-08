@@ -1,335 +1,156 @@
-import { Image } from "expo-image";
-import { router, useFocusEffect } from "expo-router";
-import { StatusBar } from "expo-status-bar";
-import { useCallback, useState } from "react";
-import { Pressable, Text, useWindowDimensions, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Svg, { Path } from "react-native-svg";
+import { useBottomNavHeight } from '@/hooks/use-bottom-nav-height';
+import { useClientNavScroll } from '@/hooks/use-client-nav-scroll';
+import { Image } from 'expo-image';
+import { router } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path } from 'react-native-svg';
 
-import { getMyUnreadNotificationCount } from "@/services/notifications";
-import { homeStyles as styles } from "@/styles/home.styles";
-import { bottomNavMetrics } from "@/styles/navigation.styles";
-
-const FIGMA_WIDTH = 412;
-const FIGMA_HEIGHT = 917;
-const FIGMA_NAV_TOP = 844;
-
-const highlights = [
-  {
-    image: require("@/assets/images/highlight-weddings.png"),
-    imageStyle: { height: 162, left: 28, top: 629, width: 110 },
-    label: "Weddings",
-    labelStyle: { left: 51, top: 801, width: 66 },
-  },
-  {
-    image: require("@/assets/images/highlight-group-photos.png"),
-    imageStyle: { height: 164, left: 151, top: 629, width: 112 },
-    label: "Group Photos",
-    labelStyle: { left: 161, top: 801, width: 92 },
-  },
-  {
-    image: require("@/assets/images/highlight-portrait.png"),
-    imageStyle: { height: 164, left: 279, top: 629, width: 110 },
-    label: "Portrait",
-    labelStyle: { left: 314, top: 801, width: 50 },
-  },
-];
+import { useNotificationUnreadCount } from '@/hooks/use-notification-unread-count';
+import { useClientHomeHighlights } from '@/hooks/use-client-home-highlights';
+import { HomeHighlights } from '@/components/home-highlights';
+import { responsiveStyles as styles } from '@/styles/responsive.styles';
 
 export default function HomePageScreen() {
-  const { width, height } = useWindowDimensions();
+  const navHeight = useBottomNavHeight();
+  const navScroll = useClientNavScroll();
   const insets = useSafeAreaInsets();
-  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
-  const navTop = height - bottomNavMetrics.height - insets.bottom;
-  const scale = Math.min(
-    width / FIGMA_WIDTH,
-    height / FIGMA_HEIGHT,
-    navTop / FIGMA_NAV_TOP,
-  );
-  const frameWidth = FIGMA_WIDTH * scale;
-  const left = (width - frameWidth) / 2;
-
-  const px = (value: number) => value * scale;
-  const x = (value: number) => left + px(value);
-  const y = (value: number) => value * scale;
+  const { unreadCount: unreadNotificationCount, error: notificationError, isRefreshing: isCountRefreshing,
+    refresh: refreshNotificationCount } = useNotificationUnreadCount();
+  const { highlights, error: highlightsError, isLoading: isLoadingHighlights,
+    isRefreshing: isRefreshingHighlights, refresh: refreshHighlights, getHighlight } = useClientHomeHighlights();
   const unreadNotificationCountText = formatNotificationBadgeCount(
     unreadNotificationCount,
   );
 
-  useFocusEffect(
-    useCallback(() => {
-      let isMounted = true;
-
-      getMyUnreadNotificationCount()
-        .then((count) => {
-          if (isMounted) {
-            setUnreadNotificationCount(count);
-          }
-        })
-        .catch(() => {
-          if (isMounted) {
-            setUnreadNotificationCount(0);
-          }
-        });
-
-      return () => {
-        isMounted = false;
-      };
-    }, []),
-  );
-
   return (
-    <View style={styles.container}>
+    <View style={styles.screen}>
       <StatusBar style="light" />
-
-      <Image
-        contentFit="cover"
-        source={require("@/assets/images/Home.png")}
-        style={[
-          styles.heroImage,
-          {
-            left: x(-46),
-            width: px(504),
-            height: px(669),
-          },
-        ]}
-      />
-
-      <View
-        style={[
-          styles.contentPanel,
-          {
-            top: y(550),
-            left: x(0),
-            width: px(412),
-            borderTopLeftRadius: px(30),
-            borderTopRightRadius: px(30),
-          },
-        ]}
-      />
-
-      <Text
-        style={[
-          styles.brandTitle,
-          {
-            left: x(129),
-            top: y(27),
-            width: px(181),
-            fontSize: px(32),
-            lineHeight: px(58),
-          },
-        ]}
+      <ScrollView
+        {...navScroll}
+        style={styles.scroll}
+        contentContainerStyle={{ paddingBottom: navHeight + insets.bottom + 24 }}
       >
-        PhotoSync
-      </Text>
-
-      <Pressable
-        accessibilityLabel="Open notifications"
-        accessibilityRole="button"
-        onPress={() => router.push("/notifications" as never)}
-        style={({ pressed }) => [
-          styles.notificationButton,
-          {
-            left: x(350),
-            top: y(39),
-            width: px(38),
-            height: px(38),
-            borderRadius: px(19),
-            opacity: pressed ? 0.82 : 1,
-          },
-        ]}
-      >
-        <BellIcon color="#4C77A5" size={px(31)} />
-        {unreadNotificationCountText ? (
-          <View
-            style={[
-              styles.notificationBadge,
-              {
-                minWidth: px(unreadNotificationCountText.length > 2 ? 25 : 19),
-                height: px(19),
-                borderRadius: px(10),
-                right: px(-4),
-                top: px(-3),
-                paddingHorizontal: px(4),
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.notificationBadgeText,
-                { fontSize: px(10), lineHeight: px(13) },
-              ]}
-            >
-              {unreadNotificationCountText}
-            </Text>
-          </View>
-        ) : null}
-      </Pressable>
-
-      <Image
-        contentFit="contain"
-        source={require("@/assets/icons/home-camera-white.png")}
-        style={[
-          styles.cameraIcon,
-          { left: x(73), top: y(191), width: px(44), height: px(29) },
-        ]}
-      />
-
-      <Text
-        style={[
-          styles.photographerName,
-          {
-            left: x(30),
-            top: y(217),
-            width: px(148),
-            fontSize: px(32),
-            lineHeight: px(34),
-          },
-        ]}
-      >
-        PhotoSync Studio
-      </Text>
-
-      <View
-        style={[
-          styles.photographyRow,
-          { left: x(23), top: y(258), width: px(139), height: px(16) },
-        ]}
-      >
-        <View style={[styles.photographyLine, { width: px(25) }]} />
-        <Text
-          style={[
-            styles.photographyText,
-            { fontSize: px(10), lineHeight: px(16) },
-          ]}
-        >
-          PHOTOGRAPHY
-        </Text>
-        <View style={[styles.photographyLine, { width: px(25) }]} />
-      </View>
-
-      <Text
-        style={[
-          styles.headline,
-          {
-            left: x(23),
-            top: y(281),
-            width: px(177),
-            fontSize: px(30),
-            lineHeight: px(39),
-          },
-        ]}
-      >
-        Capture a{"\n"}Brighter{"\n"}Tomorrow.
-      </Text>
-
-      <Text
-        style={[
-          styles.subtitle,
-          {
-            left: x(27),
-            top: y(422),
-            width: px(187),
-            fontSize: px(13),
-            lineHeight: px(16),
-          },
-        ]}
-      >
-        Professional photography{"\n"}for life&apos;s meaningful moments.
-      </Text>
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Book a session"
-        onPress={() => router.push("/services" as never)}
-        style={({ pressed }) => [
-          styles.bookButton,
-          {
-            left: x(23),
-            top: y(466),
-            width: px(369),
-            height: px(64),
-            borderRadius: px(15),
-            opacity: pressed ? 0.82 : 1,
-          },
-        ]}
-      >
-        <Text
-          style={[
-            styles.bookButtonText,
-            { fontSize: px(22), lineHeight: px(29) },
-          ]}
-        >
-          Book a session
-        </Text>
-      </Pressable>
-
-      <Text
-        style={[
-          styles.highlightsTitle,
-          { left: x(33), top: y(581), fontSize: px(24), lineHeight: px(29) },
-        ]}
-      >
-        Our Highlights
-      </Text>
-      <View
-        style={[
-          styles.panelDot,
-          {
-            left: x(380),
-            top: y(566),
-            width: px(14),
-            height: px(13),
-            borderRadius: px(7),
-          },
-        ]}
-      />
-
-      {highlights.map((item) => (
-        <View key={item.label}>
+        <View style={styles.hero}>
           <Image
             contentFit="cover"
-            source={item.image}
-            style={[
-              styles.highlightImage,
-              {
-                left: x(item.imageStyle.left),
-                top: y(item.imageStyle.top),
-                width: px(item.imageStyle.width),
-                height: px(item.imageStyle.height),
-                borderRadius: px(10),
-              },
-            ]}
+            source={require('@/assets/images/Home.png')}
+            style={styles.backdrop}
           />
-          <Text
+          <View style={styles.scrim} />
+          <View
             style={[
-              styles.highlightLabel,
-              {
-                left: x(item.labelStyle.left),
-                top: y(item.labelStyle.top),
-                width: px(item.labelStyle.width),
-                fontSize: px(13),
-                lineHeight: px(16),
-              },
+              styles.heroContent,
+              { paddingTop: insets.top + 20, minHeight: 520 },
             ]}
           >
-            {item.label}
-          </Text>
+            <View style={styles.brandRow}>
+              <View style={{ width: 44 }} />
+              <Text style={styles.brand}>PhotoSync</Text>
+              <Pressable
+                accessibilityLabel={unreadNotificationCount === null ? 'Open notifications'
+                  : `Open notifications, ${unreadNotificationCount} unread`}
+                accessibilityRole="button"
+                onPress={() => router.push('/notifications')}
+                style={styles.iconButton}
+              >
+                <BellIcon color="#FFFFFF" size={28} />
+                {unreadNotificationCountText ? (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      right: 0,
+                      top: 0,
+                      backgroundColor: '#ED2314',
+                      borderRadius: 10,
+                      paddingHorizontal: 5,
+                    }}
+                  >
+                    <Text style={{ color: '#FFFFFF', fontSize: 11 }}>
+                      {unreadNotificationCountText}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+            </View>
+            {notificationError ? (
+              <Pressable accessibilityRole="button" accessibilityLabel="Retry notification count"
+                disabled={isCountRefreshing} onPress={() => { void refreshNotificationCount(); }}
+                style={({ pressed }) => [{ minHeight: 44, justifyContent: 'center' }, pressed && { opacity: 0.8 }]}>
+                <Text accessibilityRole="alert" style={[styles.heroText, { fontSize: 12, lineHeight: 18 }]}>
+                  {unreadNotificationCount === null
+                    ? 'Couldn’t load the notification count. Tap to try again.'
+                    : 'Couldn’t update the notification count. Showing the last known count. Tap to try again.'}
+                </Text>
+              </Pressable>
+            ) : null}
+            <View style={{ marginTop: 64, gap: 10 }}>
+              <Image
+                contentFit="contain"
+                source={require('@/assets/icons/home-camera-white.png')}
+                style={{ width: 38, height: 30 }}
+              />
+              <Text
+                style={[
+                  styles.heroTitle,
+                  { fontFamily: 'Italianno', fontSize: 36, lineHeight: 46 },
+                ]}
+              >
+                PhotoSync Studio
+              </Text>
+              <Text style={styles.eyebrow}>— PHOTOGRAPHY —</Text>
+              <Text style={styles.heroTitle}>Capture a Brighter Tomorrow.</Text>
+              <Text style={[styles.heroText, { maxWidth: 360 }]}>
+                Professional photography for life&apos;s meaningful moments.
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push('/services')}
+              style={({ pressed }) => [
+                styles.button,
+                { backgroundColor: '#3D83AC', marginTop: 12 },
+                pressed && { opacity: 0.8 },
+              ]}
+            >
+              <Text style={styles.buttonText}>Book a session</Text>
+            </Pressable>
+          </View>
         </View>
-      ))}
+        <View
+          style={[
+            styles.content,
+            {
+              borderTopLeftRadius: 28,
+              borderTopRightRadius: 28,
+              backgroundColor: '#F3EEEE',
+              marginTop: -12,
+            },
+          ]}
+        >
+          <HomeHighlights items={highlights} isLoading={isLoadingHighlights} error={highlightsError}
+            isRefreshing={isRefreshingHighlights} onRetry={() => { void refreshHighlights(); }}
+            onSelect={(item) => {
+              const current = getHighlight(item.id);
+              if (current) router.push({ pathname: '/services/[slug]', params: { slug: current.slug } });
+            }} />
+        </View>
+      </ScrollView>
     </View>
   );
 }
 
-function formatNotificationBadgeCount(count: number) {
-  if (count <= 0) {
-    return "";
+function formatNotificationBadgeCount(count: number | null) {
+  if (count === null || count <= 0) {
+    return '';
   }
 
-  return count > 99 ? "99+" : String(count);
+  return count > 99 ? '99+' : String(count);
 }
 
 function BellIcon({
-  color = "#142C4C",
+  color = '#142C4C',
   size,
 }: {
   color?: string;

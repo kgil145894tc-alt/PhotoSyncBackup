@@ -110,7 +110,13 @@ export const bookingScheduleStyles = StyleSheet.create({
     color: '#B9B9B9',
   },
   unavailableDayText: {
-    color: '#E45F62',
+    color: '#ffffff',
+    fontFamily: 'InterBold',
+  },
+  unavailableDay: {
+    backgroundColor: '#E45F62',
+    borderColor: '#B32B2B',
+    borderWidth: 1,
   },
   selectedDay: {
     backgroundColor: '#D1E2F7',

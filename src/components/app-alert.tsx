@@ -1,5 +1,20 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 type AppAlertOptions = {
@@ -9,7 +24,9 @@ type AppAlertOptions = {
 
 type AlertListener = (alert: AppAlertOptions) => void;
 
-const AppAlertContext = createContext<(title: string, message?: string) => void>(() => undefined);
+const AppAlertContext = createContext<
+  (title: string, message?: string) => void
+>(() => undefined);
 let alertListener: AlertListener | null = null;
 
 export function showAppAlert(title: string, message?: string) {
@@ -54,33 +71,54 @@ export function AppAlertProvider({ children }: { children: ReactNode }) {
         onRequestClose={closeAlert}
         statusBarTranslucent
         transparent
-        visible={alert !== null}>
+        visible={alert !== null}
+      >
         <View style={styles.backdrop}>
-          <View style={[styles.card, { width: cardWidth }]}>
-            <Pressable
-              accessibilityLabel="Close message"
-              accessibilityRole="button"
-              hitSlop={12}
-              onPress={closeAlert}
-              style={({ pressed }) => [styles.closeButton, pressed && styles.pressed]}>
-              <CloseIcon />
-            </Pressable>
+          <ScrollView
+            style={{ width: '100%' }}
+            contentContainerStyle={{
+              flexGrow: 1,
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingVertical: 24,
+            }}
+          >
+            <View style={[styles.card, { width: cardWidth }]}>
+              <Pressable
+                accessibilityLabel="Close message"
+                accessibilityRole="button"
+                hitSlop={12}
+                onPress={closeAlert}
+                style={({ pressed }) => [
+                  styles.closeButton,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <CloseIcon />
+              </Pressable>
 
-            <View style={styles.iconCircle}>
-              <InfoIcon />
+              <View style={styles.iconCircle}>
+                <InfoIcon />
+              </View>
+
+              <Text style={styles.title}>{alert?.title}</Text>
+              {alert?.message ? (
+                <Text style={styles.message}>{alert.message}</Text>
+              ) : null}
+
+              <Pressable
+                accessibilityLabel="OK"
+                accessibilityRole="button"
+                onPress={closeAlert}
+                style={({ pressed }) => [
+                  styles.okButton,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={styles.okText}>OK</Text>
+              </Pressable>
             </View>
-
-            <Text style={styles.title}>{alert?.title}</Text>
-            {alert?.message ? <Text style={styles.message}>{alert.message}</Text> : null}
-
-            <Pressable
-              accessibilityLabel="OK"
-              accessibilityRole="button"
-              onPress={closeAlert}
-              style={({ pressed }) => [styles.okButton, pressed && styles.pressed]}>
-              <Text style={styles.okText}>OK</Text>
-            </Pressable>
-          </View>
+          </ScrollView>
         </View>
       </Modal>
     </AppAlertContext.Provider>
@@ -90,7 +128,12 @@ export function AppAlertProvider({ children }: { children: ReactNode }) {
 function CloseIcon() {
   return (
     <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-      <Path d="M6 6L18 18M18 6L6 18" stroke="#142C4C" strokeLinecap="round" strokeWidth={3} />
+      <Path
+        d="M6 6L18 18M18 6L6 18"
+        stroke="#142C4C"
+        strokeLinecap="round"
+        strokeWidth={3}
+      />
     </Svg>
   );
 }
@@ -98,8 +141,18 @@ function CloseIcon() {
 function InfoIcon() {
   return (
     <Svg width={52} height={52} viewBox="0 0 52 52" fill="none">
-      <Path d="M26 14V29" stroke="#142C4C" strokeLinecap="round" strokeWidth={4} />
-      <Path d="M26 37H26.1" stroke="#142C4C" strokeLinecap="round" strokeWidth={5} />
+      <Path
+        d="M26 14V29"
+        stroke="#142C4C"
+        strokeLinecap="round"
+        strokeWidth={4}
+      />
+      <Path
+        d="M26 37H26.1"
+        stroke="#142C4C"
+        strokeLinecap="round"
+        strokeWidth={5}
+      />
     </Svg>
   );
 }
@@ -162,7 +215,8 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     backgroundColor: '#142C4C',
     borderRadius: 14,
-    height: 48,
+    minHeight: 48,
+    paddingVertical: 12,
     justifyContent: 'center',
     marginTop: 24,
   },

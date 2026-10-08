@@ -1,10 +1,18 @@
 import { Image } from 'expo-image';
-import { Pressable, Text, View, type ImageStyle, type StyleProp, type ViewStyle } from 'react-native';
+import {
+  Pressable,
+  Text,
+  useWindowDimensions,
+  View,
+  type ImageStyle,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { photographerStyles as styles } from '@/styles/photographer.styles';
 
-export const ADMIN_BRAND_HEADER_HEIGHT = 156;
+export const ADMIN_BRAND_HEADER_HEIGHT = 104;
 
 type AdminBrandHeaderProps = {
   backAccessibilityLabel?: string;
@@ -25,8 +33,23 @@ export function AdminBrandHeader({
   textureStyle,
   topInset,
 }: AdminBrandHeaderProps) {
+  const { fontScale, width } = useWindowDimensions();
+  const copyWidth = Math.max(60, width - (onBack ? 128 + 28 : 44 + 38) - 12);
+  const brandLines = Math.max(1, Math.ceil(150 * fontScale / copyWidth));
+  const eyebrowLines = Math.max(1, Math.ceil((70 * fontScale + 22) / copyWidth));
+  const height = Math.max(
+    ADMIN_BRAND_HEADER_HEIGHT,
+    topInset + (30 * brandLines + 15 * eyebrowLines) * fontScale + 28,
+  );
   return (
-    <View style={[styles.adminBrandHeader, elevated && styles.adminBrandHeaderElevated, { paddingTop: topInset }, style]}>
+    <View
+      style={[
+        styles.adminBrandHeader,
+        elevated && styles.adminBrandHeaderElevated,
+        { height },
+        style,
+      ]}
+    >
       <Image
         contentFit="cover"
         source={textureSource}
@@ -37,17 +60,33 @@ export function AdminBrandHeader({
           accessibilityLabel={backAccessibilityLabel}
           accessibilityRole="button"
           onPress={onBack}
-          style={({ pressed }) => [styles.adminBrandHeaderBackButton, pressed && { opacity: 0.78 }]}>
+          style={({ pressed }) => [
+            styles.adminBrandHeaderBackButton,
+            { top: topInset + 22 },
+            pressed && { opacity: 0.78 },
+          ]}
+        >
           <BackIcon />
         </Pressable>
       ) : null}
-      <View style={styles.adminBrandHeaderBrand}>
-        <Text style={styles.adminBrandHeaderBrandText}>PhotoSync</Text>
+      <View
+        style={[
+          styles.adminBrandHeaderBrand,
+          { paddingHorizontal: onBack ? 64 : 22, paddingTop: topInset },
+        ]}
+      >
         <Image
           contentFit="contain"
           source={require('@/assets/images/admin-calendar-logo.png')}
-          style={styles.adminBrandHeaderLogo}
+          style={[
+            styles.adminBrandHeaderLogo,
+            onBack && { width: 28, height: 28 },
+          ]}
         />
+        <View style={styles.adminBrandHeaderCopy}>
+          <Text style={styles.adminBrandHeaderBrandText}>PhotoSync</Text>
+          <Text style={styles.adminBrandHeaderEyebrow}>STUDIO ADMIN</Text>
+        </View>
       </View>
     </View>
   );

@@ -1,4 +1,12 @@
-import { Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 type LogoutConfirmationModalProps = {
@@ -23,48 +31,68 @@ export function LogoutConfirmationModal({
       onRequestClose={onCancel}
       statusBarTranslucent
       transparent
-      visible={visible}>
+      visible={visible}
+    >
       <View style={styles.backdrop}>
-        <View style={[styles.card, { width: cardWidth }]}>
-          <Pressable
-            accessibilityLabel="Close logout confirmation"
-            accessibilityRole="button"
-            disabled={isLoading}
-            hitSlop={12}
-            onPress={onCancel}
-            style={({ pressed }) => [styles.closeButton, pressed && styles.pressed]}>
-            <CloseIcon />
-          </Pressable>
-
-          <View style={styles.iconCircle}>
-            <LogoutSymbol />
-          </View>
-
-          <Text style={styles.title}>Are you sure you want to log out?</Text>
-
-          <View style={styles.buttonRow}>
+        <ScrollView
+          style={{ width: '100%' }}
+          contentContainerStyle={{
+            flexGrow: 1,
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingVertical: 24,
+          }}
+        >
+          <View style={[styles.card, { width: cardWidth }]}>
             <Pressable
-              accessibilityLabel="Cancel logout"
+              accessibilityLabel="Close logout confirmation"
               accessibilityRole="button"
               disabled={isLoading}
+              hitSlop={12}
               onPress={onCancel}
-              style={({ pressed }) => [styles.cancelButton, pressed && styles.pressed]}>
-              <Text style={styles.cancelText}>Cancel</Text>
+              style={({ pressed }) => [
+                styles.closeButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <CloseIcon />
             </Pressable>
 
-            <Pressable
-              accessibilityLabel="Confirm logout"
-              accessibilityRole="button"
-              disabled={isLoading}
-              onPress={onConfirm}
-              style={({ pressed }) => [
-                styles.logoutButton,
-                (pressed || isLoading) && styles.pressed,
-              ]}>
-              <Text style={styles.logoutText}>Logout</Text>
-            </Pressable>
+            <View style={styles.iconCircle}>
+              <LogoutSymbol />
+            </View>
+
+            <Text style={styles.title}>Are you sure you want to log out?</Text>
+
+            <View style={styles.buttonRow}>
+              <Pressable
+                accessibilityLabel="Cancel logout"
+                accessibilityRole="button"
+                disabled={isLoading}
+                onPress={onCancel}
+                style={({ pressed }) => [
+                  styles.cancelButton,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={styles.cancelText}>Cancel</Text>
+              </Pressable>
+
+              <Pressable
+                accessibilityLabel="Confirm logout"
+                accessibilityRole="button"
+                disabled={isLoading}
+                onPress={onConfirm}
+                style={({ pressed }) => [
+                  styles.logoutButton,
+                  (pressed || isLoading) && styles.pressed,
+                ]}
+              >
+                <Text style={styles.logoutText}>Logout</Text>
+              </Pressable>
+            </View>
           </View>
-        </View>
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -73,7 +101,12 @@ export function LogoutConfirmationModal({
 function CloseIcon() {
   return (
     <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-      <Path d="M6 6L18 18M18 6L6 18" stroke="#142C4C" strokeLinecap="round" strokeWidth={3} />
+      <Path
+        d="M6 6L18 18M18 6L6 18"
+        stroke="#142C4C"
+        strokeLinecap="round"
+        strokeWidth={3}
+      />
     </Svg>
   );
 }
@@ -154,7 +187,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#DCE4F3',
     borderRadius: 14,
     flex: 1,
-    height: 48,
+    minHeight: 48,
+    paddingVertical: 12,
     justifyContent: 'center',
   },
   logoutButton: {
@@ -162,7 +196,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#142C4C',
     borderRadius: 14,
     flex: 1,
-    height: 48,
+    minHeight: 48,
+    paddingVertical: 12,
     justifyContent: 'center',
   },
   cancelText: {

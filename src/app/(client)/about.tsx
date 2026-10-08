@@ -1,9 +1,12 @@
+import { useBottomNavHeight } from '@/hooks/use-bottom-nav-height';
+import { useClientNavScroll } from '@/hooks/use-client-nav-scroll';
+import { useClientStudioSettings } from '@/hooks/use-client-studio-settings';
 import { Image, ImageBackground } from 'expo-image';
+import { StatusBar } from 'expo-status-bar';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
-import { bottomNavMetrics } from '@/styles/navigation.styles';
 import { aboutStyles as styles } from '@/styles/about.styles';
 
 type ServiceCardProps = {
@@ -34,13 +37,20 @@ const services = [
   { image: require('@/assets/images/about/about-videography.png'), label: 'Videography' },
 ];
 
+const STUDIO_ADDRESS = 'Lacor Building, Doors 1-3, Sobrecary St. Brgy. Magugpo Poblacion, Tagum City.';
+
 export default function AboutScreen() {
+  const navHeight = useBottomNavHeight();
+  const navScroll = useClientNavScroll();
   const insets = useSafeAreaInsets();
-  const bottomPadding = bottomNavMetrics.height + insets.bottom + 40;
+  const { settings, error: settingsError, refresh: refreshSettings } = useClientStudioSettings();
+  const businessHours = settings?.businessHours.trim();
+  const bottomPadding = navHeight + insets.bottom + 40;
 
   return (
     <View style={styles.root}>
-      <ScrollView bounces={false} contentContainerStyle={{ paddingBottom: bottomPadding }} showsVerticalScrollIndicator={false}>
+      <StatusBar style="light" />
+      <ScrollView {...navScroll} bounces={false} contentContainerStyle={{ paddingBottom: bottomPadding }} showsVerticalScrollIndicator={false}>
         <View style={[styles.topBar, { paddingTop: insets.top + 16 }]}>
           <Text style={styles.topBarTitle}>PhotoSync</Text>
           <Image contentFit="contain" source={require('@/assets/images/about/about-logo.png')} style={styles.topBarLogo} />
@@ -148,20 +158,24 @@ export default function AboutScreen() {
               <ShareIcon />
             </ContactCard>
             <ContactCard
-              lines={["We'd be happy to meet you in person.", '123 Lens Street', 'Tagum City, Davao del Norte']}
+              lines={["We'd be happy to meet you in person.", STUDIO_ADDRESS]}
               title="Visit Our Studio">
               <LocationIcon />
             </ContactCard>
             <ContactCard
-              lines={['Mon - Sat: 8:00 AM - 6:00 PM', 'Sunday: By Appointment']}
+              lines={[
+                businessHours || (settingsError ? 'Unable to load business hours.' : settings
+                  ? 'Please contact the studio for business hours.' : 'Loading business hours...'),
+                ...(settingsError ? ['Tap to retry.'] : []),
+              ]}
+              onPress={settingsError ? refreshSettings : undefined}
               title="Business Hours">
               <TimeIcon />
             </ContactCard>
           </View>
 
           <Text style={styles.footerText}>
-            PhotoSync Photography Studio{'\n'}Lacor Building, Doors 1-3, Sobrecary St. Brgy. Magugpo Poblacion,
-            Tagum City.
+            PhotoSync Photography Studio
           </Text>
         </View>
       </ScrollView>
@@ -173,7 +187,9 @@ function ServiceCard({ height = 300, image, label }: ServiceCardProps) {
   return (
     <View style={[styles.serviceCard, { height }]}>
       <Image contentFit="cover" source={image} style={styles.serviceImage} />
-      <Text style={styles.serviceLabel}>{label}</Text>
+      <View style={styles.serviceLabelBadge}>
+        <Text style={styles.serviceLabel}>{label}</Text>
+      </View>
     </View>
   );
 }

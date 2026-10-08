@@ -1,9 +1,11 @@
 import { supabase } from '@/lib/supabase';
 import { fallbackPortraitPackages, fallbackServices, getFallbackServiceBySlug } from '@/data/service-catalog';
 import { createAuditLog } from '@/services/audit-log';
-import { PackageCatalogItem, ServiceCatalogItem, ServiceSlug } from '@/types/services';
+import { emitCatalogChanged } from '@/services/catalog-events';
+import { AdminServiceCatalog, ClientServiceCatalog, PackageCatalogItem, ServiceCatalogItem, ServiceHighlight, ServiceSlug } from '@/types/services';
 
 type ServiceRow = {
+  archived_at?: string | null;
   buffer_minutes: number | null;
   description: string | null;
   duration_minutes: number | null;
@@ -17,6 +19,7 @@ type ServiceRow = {
 };
 
 type PackageRow = {
+  archived_at?: string | null;
   badge: string | null;
   id: string;
   inclusions: string[] | null;
@@ -26,12 +29,6 @@ type PackageRow = {
   price: number;
   service_id: string;
 };
-
-const packageCatalogCache = new Map<ServiceSlug, PackageCatalogItem[]>();
-const serviceCatalogBySlugCache = new Map<ServiceSlug, ServiceCatalogItem>();
-let adminPackageCatalogCache: PackageCatalogItem[] | null = null;
-let adminServicesCatalogCache: ServiceCatalogItem[] | null = null;
-let servicesCatalogCache: ServiceCatalogItem[] | null = null;
 
 export type ServiceFormValues = {
   basePrice: number;
@@ -57,177 +54,135 @@ export type PackageFormValues = {
   serviceId: string;
 };
 
-export function getCachedServicesCatalog() {
-  return servicesCatalogCache;
+export async function getServiceHighlights(): Promise<ServiceHighlight[]> {
+  if (!supabase) throw new Error('Studio highlights are not connected yet.');
+
+  // Highlights use published service data only, without the catalog's bundled
+  // sample-photo fallback. Keep the existing three-card dashboard layout.
+  const highlights: ServiceHighlight[] = [];
+  const pageSize = 12;
+  for (let offset = 0; highlights.length < 3; offset += pageSize) {
+    const { data, error } = await supabase.from('services')
+      .select('id, name, slug, image_url')
+      .eq('is_active', true)
+      .is('archived_at', null)
+      .not('image_url', 'is', null)
+      .not('slug', 'is', null)
+      .neq('image_url', '')
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true }).range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      if (row.image_url?.trim() && row.name?.trim() && row.slug?.trim()) {
+        highlights.push({ id: row.id, imageUrl: row.image_url.trim(), name: row.name, slug: row.slug });
+        if (highlights.length === 3) break;
+      }
+    }
+    if ((data?.length ?? 0) < pageSize) break;
+  }
+  return highlights;
 }
 
-export function getCachedAdminServicesCatalog() {
-  return adminServicesCatalogCache;
+// Bounded pages prevent the API's row cap from silently truncating larger catalogs.
+async function readCatalogRows<Row>(
+  loadPage: (from: number, to: number) => PromiseLike<{ data: Row[] | null; error: unknown }>,
+  isSessionCurrent?: () => boolean,
+): Promise<Row[]> {
+  const rows: Row[] = [];
+  const pageSize = 200;
+  for (let offset = 0; ; offset += pageSize) {
+    if (isSessionCurrent?.() === false) throw new Error('Your session changed.');
+    const { data, error } = await loadPage(offset, offset + pageSize - 1);
+    if (isSessionCurrent?.() === false) throw new Error('Your session changed.');
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if ((data?.length ?? 0) < pageSize) return rows;
+  }
 }
 
-export function getCachedAdminPackagesCatalog() {
-  return adminPackageCatalogCache;
+// Strict admin read: a pair of paged reads supplies both lists and their counts.
+// Errors and genuine empty catalogs must never become editable sample records.
+export async function getAdminServiceCatalog(
+  { isSessionCurrent }: { isSessionCurrent?: () => boolean } = {},
+): Promise<AdminServiceCatalog> {
+  if (!supabase) throw new Error('Services are not connected yet.');
+  const connection = supabase;
+  const [serviceRows, packageRows] = await Promise.all([
+    readCatalogRows<ServiceRow>((from, to) => connection.from('services')
+      .select('id, slug, name, description, duration_minutes, buffer_minutes, minimum_notice_days, price, image_url, is_active, archived_at')
+      .is('archived_at', null)
+      .order('created_at', { ascending: true }).order('id', { ascending: true }).range(from, to), isSessionCurrent),
+    readCatalogRows<PackageRow>((from, to) => connection.from('packages')
+      .select('id, service_id, name, badge, price, inclusions, image_url, is_active, archived_at')
+      .is('archived_at', null)
+      .order('created_at', { ascending: true }).order('id', { ascending: true }).range(from, to), isSessionCurrent),
+  ]);
+  const liveServices = serviceRows.filter((row) => row.archived_at == null);
+  const servicesById = new Map(liveServices.map((row) => [row.id, row]));
+  const livePackages = packageRows.filter((row) => row.archived_at == null && servicesById.has(row.service_id));
+  const packageCounts = countPackagesByService(livePackages, true);
+  return {
+    services: liveServices.map((row, index) => mapServiceRow(row, index, packageCounts)),
+    packages: livePackages.map((row, index) => {
+      const service = servicesById.get(row.service_id);
+      return mapPackageRow(row, index, service?.duration_minutes, service?.buffer_minutes, service?.minimum_notice_days);
+    }),
+  };
 }
 
-export function getCachedServiceCatalogBySlug(slug: ServiceSlug) {
-  return serviceCatalogBySlugCache.get(slug) ?? null;
+// One strict snapshot supplies client categories, packages, counts and rules.
+// The browsing store owns freshness; this function always reads the server.
+export async function getClientServiceCatalog(
+  { isSessionCurrent }: { isSessionCurrent?: () => boolean } = {},
+): Promise<ClientServiceCatalog> {
+  if (!supabase) throw new Error('Services are not connected yet.');
+  if (isSessionCurrent?.() === false) throw new Error('Your session changed.');
+  const connection = supabase;
+  const [allServices, allPackages] = await Promise.all([
+    readCatalogRows<ServiceRow>((from, to) => connection.from('services')
+      .select('id, slug, name, description, duration_minutes, buffer_minutes, minimum_notice_days, price, image_url, is_active, archived_at')
+      .is('archived_at', null).eq('is_active', true).order('created_at', { ascending: true }).order('id', { ascending: true }).range(from, to), isSessionCurrent),
+    readCatalogRows<PackageRow>((from, to) => connection.from('packages')
+      .select('id, service_id, name, badge, price, inclusions, image_url, is_active, archived_at')
+      .is('archived_at', null).eq('is_active', true).order('created_at', { ascending: true }).order('id', { ascending: true }).range(from, to), isSessionCurrent),
+  ]);
+  if (isSessionCurrent?.() === false) throw new Error('Your session changed.');
+  const serviceRows = allServices
+    .filter((row) => row.archived_at == null && row.is_active && row.slug?.trim());
+  const servicesById = new Map(serviceRows.map((row) => [row.id, row]));
+  const packageRows = allPackages
+    .filter((row) => row.archived_at == null && row.is_active && servicesById.has(row.service_id));
+  const packageCounts = countPackagesByService(packageRows);
+  return {
+    services: serviceRows.map((row, index) => ({ ...mapServiceRow(row, index, packageCounts),
+      basePrice: Number(row.price ?? 0), bufferMinutes: row.buffer_minutes,
+      durationMinutes: row.duration_minutes, minimumNoticeDays: row.minimum_notice_days })),
+    packages: packageRows.map((row, index) => mapClientPackageRow(row, index, servicesById.get(row.service_id)!)),
+  };
 }
 
-export function getCachedPackagesForService(slug: ServiceSlug) {
-  return packageCatalogCache.get(slug) ?? null;
+// Booking confirmation must bypass all browsing caches.
+export async function getBookablePackage(id: string, serviceId: string): Promise<PackageCatalogItem | null> {
+  if (!supabase) throw new Error('Services are not connected yet.');
+  const { data, error } = await supabase.from('packages')
+    .select('id, service_id, name, badge, price, inclusions, image_url, is_active, archived_at, services:service_id(is_active, archived_at, duration_minutes, buffer_minutes, minimum_notice_days)')
+    .is('archived_at', null).eq('id', id).eq('service_id', serviceId).maybeSingle();
+  if (error) throw error;
+  const row = data as unknown as (PackageRow & { services: Pick<ServiceRow,
+    'is_active' | 'archived_at' | 'duration_minutes' | 'buffer_minutes' | 'minimum_notice_days'> | null }) | null;
+  if (!row || row.archived_at != null || row.id !== id || row.service_id !== serviceId || !row.is_active
+    || !row.services?.is_active || row.services.archived_at != null) return null;
+  if (!Number.isFinite(Number(row.price)) || row.price === null || Number(row.price) < 0) {
+    throw new Error('The package price could not be verified.');
+  }
+  return mapClientPackageRow(row, 0, row.services);
 }
 
-export async function getServicesCatalog(): Promise<ServiceCatalogItem[]> {
-  if (!supabase) {
-    return fallbackServices;
-  }
-
-  const { data, error } = await supabase
-    .from('services')
-    .select('id, slug, name, description, duration_minutes, buffer_minutes, minimum_notice_days, price, image_url, is_active')
-    .eq('is_active', true)
-    .order('created_at', { ascending: true });
-
-  if (error || !data?.length) {
-    return servicesCatalogCache ?? fallbackServices;
-  }
-
-  const serviceIds = data.map((service) => service.id);
-  const { data: packages } = await supabase
-    .from('packages')
-    .select('service_id')
-    .in('service_id', serviceIds)
-    .eq('is_active', true);
-
-  const items = data.map((row, index) => mapServiceRow(row as ServiceRow, index, packages ?? []));
-
-  servicesCatalogCache = items;
-  items.forEach((item) => serviceCatalogBySlugCache.set(item.slug, item));
-
-  return items;
-}
-
-export async function getServiceCatalogBySlug(slug: ServiceSlug): Promise<ServiceCatalogItem | null> {
-  const fallback = getFallbackServiceBySlug(slug);
-
-  if (!supabase) {
-    return fallback ?? null;
-  }
-
-  const { data, error } = await supabase
-    .from('services')
-    .select('id, slug, name, description, duration_minutes, buffer_minutes, minimum_notice_days, price, image_url, is_active')
-    .eq('slug', slug)
-    .eq('is_active', true)
-    .maybeSingle();
-
-  if (error || !data) {
-    return serviceCatalogBySlugCache.get(slug) ?? fallback ?? null;
-  }
-
-  const { data: packages } = await supabase
-    .from('packages')
-    .select('service_id')
-    .eq('service_id', data.id)
-    .eq('is_active', true);
-
-  const item = mapServiceRow(data as ServiceRow, fallbackServices.findIndex((service) => service.slug === slug), packages ?? []);
-
-  serviceCatalogBySlugCache.set(slug, item);
-
-  return item;
-}
-
-export async function getAdminServicesCatalog(): Promise<ServiceCatalogItem[]> {
-  if (!supabase) {
-    return fallbackServices;
-  }
-
-  const { data, error } = await supabase
-    .from('services')
-    .select('id, slug, name, description, duration_minutes, buffer_minutes, minimum_notice_days, price, image_url, is_active')
-    .order('created_at', { ascending: true });
-
-  if (error || !data?.length) {
-    return fallbackServices;
-  }
-
-  const serviceIds = data.map((service) => service.id);
-  const { data: packages } = await supabase
-    .from('packages')
-    .select('service_id')
-    .in('service_id', serviceIds)
-    .eq('is_active', true);
-
-  const items = data.map((row, index) => mapServiceRow(row as ServiceRow, index, packages ?? []));
-
-  adminServicesCatalogCache = items;
-
-  return items;
-}
-
-export async function getPackagesForService(slug: ServiceSlug): Promise<PackageCatalogItem[]> {
-  const fallbackService = getFallbackServiceBySlug(slug);
-
-  if (!supabase) {
-    return slug === 'portrait-photography' ? fallbackPortraitPackages : [];
-  }
-
-  const { data: service } = await supabase
-    .from('services')
-    .select('id, duration_minutes, buffer_minutes, minimum_notice_days')
-    .eq('slug', slug)
-    .maybeSingle();
-
-  if (!service?.id) {
-    return slug === 'portrait-photography' ? fallbackPortraitPackages : [];
-  }
-
-  const { data, error } = await supabase
-    .from('packages')
-    .select('id, service_id, name, badge, price, inclusions, image_url, is_active')
-    .eq('service_id', service.id)
-    .eq('is_active', true)
-    .order('created_at', { ascending: true });
-
-  if (error || !data?.length) {
-    return packageCatalogCache.get(slug) ?? (slug === 'portrait-photography' ? fallbackPortraitPackages : []);
-  }
-
-  const items = data.map((row, index) =>
-    mapPackageRow(
-      row as PackageRow,
-      index,
-      Number(service.duration_minutes ?? fallbackService?.durationMinutes ?? 0),
-      Number(service.buffer_minutes ?? fallbackService?.bufferMinutes ?? 0),
-      Number(service.minimum_notice_days ?? fallbackService?.minimumNoticeDays ?? 0),
-    ),
-  );
-
-  packageCatalogCache.set(slug, items);
-
-  return items;
-}
-
-export async function getAdminPackagesCatalog(): Promise<PackageCatalogItem[]> {
-  if (!supabase) {
-    return fallbackPortraitPackages;
-  }
-
-  const { data, error } = await supabase
-    .from('packages')
-    .select('id, service_id, name, badge, price, inclusions, image_url, is_active')
-    .order('created_at', { ascending: true });
-
-  if (error || !data?.length) {
-    return fallbackPortraitPackages;
-  }
-
-  const items = data.map((row, index) => mapPackageRow(row as PackageRow, index));
-
-  adminPackageCatalogCache = items;
-
-  return items;
+function mapClientPackageRow(row: PackageRow, index: number, service: Pick<ServiceRow,
+  'duration_minutes' | 'buffer_minutes' | 'minimum_notice_days'>): PackageCatalogItem {
+  return { ...mapPackageRow(row, index, service.duration_minutes, service.buffer_minutes, service.minimum_notice_days),
+    badge: row.badge ?? undefined, bufferMinutes: service.buffer_minutes,
+    durationMinutes: service.duration_minutes, minimumNoticeDays: service.minimum_notice_days };
 }
 
 export async function saveServiceCategory(values: ServiceFormValues) {
@@ -247,28 +202,19 @@ export async function saveServiceCategory(values: ServiceFormValues) {
     slug: values.slug.trim(),
   };
   const query = values.id
-    ? supabase.from('services').update(payload).eq('id', values.id).select('id').maybeSingle()
+    ? supabase.from('services').update(payload).eq('id', values.id).is('archived_at', null).select('id').maybeSingle()
     : supabase.from('services').insert(payload).select('id').single();
   const { data, error } = await query;
 
   if (error) {
-    return { message: error.message, success: false };
+    return { message: getServiceSaveErrorMessage(error.message), success: false };
   }
 
-  const savedId = values.id ?? data?.id;
-  const cachedSlug = values.slug.trim();
-
-  if (savedId) {
-    updateCachedService({
-      id: savedId,
-      values: {
-        ...values,
-        slug: cachedSlug,
-      },
-    });
+  if (!data?.id) {
+    return { message: 'No service was saved. Please try again.', success: false };
   }
 
-  adminServicesCatalogCache = null;
+  emitCatalogChanged();
 
   await createAuditLog({
     action: values.id ? 'service.updated' : 'service.created',
@@ -282,6 +228,14 @@ export async function saveServiceCategory(values: ServiceFormValues) {
   });
 
   return { success: true };
+}
+
+function getServiceSaveErrorMessage(message: string) {
+  if (message.includes('services_slug_key')) {
+    return 'A service with this name already exists. Please use a different service name.';
+  }
+
+  return message;
 }
 
 export async function saveServicePackage(values: PackageFormValues) {
@@ -299,7 +253,7 @@ export async function saveServicePackage(values: PackageFormValues) {
     service_id: values.serviceId,
   };
   const query = values.id
-    ? supabase.from('packages').update(payload).eq('id', values.id).select('id').maybeSingle()
+    ? supabase.from('packages').update(payload).eq('id', values.id).is('archived_at', null).select('id').maybeSingle()
     : supabase.from('packages').insert(payload).select('id').single();
   const { data, error } = await query;
 
@@ -307,8 +261,11 @@ export async function saveServicePackage(values: PackageFormValues) {
     return { message: error.message, success: false };
   }
 
-  invalidatePackageCache(values.serviceId);
-  adminPackageCatalogCache = null;
+  if (!data?.id) {
+    return { message: 'No package was saved. Please try again.', success: false };
+  }
+
+  emitCatalogChanged();
 
   await createAuditLog({
     action: values.id ? 'package.updated' : 'package.created',
@@ -323,44 +280,6 @@ export async function saveServicePackage(values: PackageFormValues) {
   });
 
   return { success: true };
-}
-
-function updateCachedService({ id, values }: { id: string; values: ServiceFormValues }) {
-  const applyValues = (item: ServiceCatalogItem): ServiceCatalogItem => ({
-    ...item,
-    basePrice: values.basePrice,
-    bufferMinutes: values.bufferMinutes,
-    description: values.description.trim(),
-    durationMinutes: values.durationMinutes,
-    id,
-    image: values.imageUrl ? { uri: values.imageUrl } : item.image,
-    imageUrl: values.imageUrl ?? item.imageUrl,
-    isActive: values.isActive,
-    minimumNoticeDays: values.minimumNoticeDays,
-    name: values.name.trim(),
-    route: `/services/${values.slug}`,
-    slug: values.slug,
-  });
-
-  const existing = serviceCatalogBySlugCache.get(values.slug);
-
-  if (existing) {
-    serviceCatalogBySlugCache.set(values.slug, applyValues(existing));
-  }
-
-  if (servicesCatalogCache) {
-    servicesCatalogCache = values.isActive
-      ? servicesCatalogCache.map((item) => (item.id === id ? applyValues(item) : item))
-      : servicesCatalogCache.filter((item) => item.id !== id);
-  }
-}
-
-function invalidatePackageCache(serviceId: string) {
-  packageCatalogCache.forEach((items, slug) => {
-    if (items.some((item) => item.serviceId === serviceId)) {
-      packageCatalogCache.delete(slug);
-    }
-  });
 }
 
 export async function uploadCatalogImage({
@@ -396,110 +315,41 @@ export async function uploadCatalogImage({
   return { publicUrl: data.publicUrl, success: true };
 }
 
-export async function setServiceActive(id: string, isActive: boolean) {
-  if (!supabase) {
-    return { message: 'Supabase is not connected yet.', success: false };
-  }
-
-  if (!isActive) {
-    const { count, error: bookingCountError } = await supabase
-      .from('bookings')
-      .select('id', { count: 'exact', head: true })
-      .eq('service_id', id);
-
-    if (bookingCountError) {
-      return { message: bookingCountError.message, success: false };
-    }
-
-    if ((count ?? 0) > 0) {
-      return {
-        message: 'This service has existing bookings and cannot be deleted.',
-        success: false,
-      };
-    }
-  }
-
-  const { data, error } = await supabase
-    .from('services')
-    .update({ is_active: isActive })
-    .eq('id', id)
-    .select('id')
-    .maybeSingle();
-
-  if (error) {
-    return { message: error.message, success: false };
-  }
-
-  if (!data) {
-    return { message: 'No service was updated. Please refresh and try again.', success: false };
-  }
-
-  await createAuditLog({
-    action: isActive ? 'service.activated' : 'service.deactivated',
-    entityId: id,
-    entityType: 'service',
-    metadata: { isActive },
-  });
-
-  adminServicesCatalogCache = adminServicesCatalogCache?.map((item) => (item.id === id ? { ...item, isActive } : item)) ?? null;
-  servicesCatalogCache = isActive
-    ? servicesCatalogCache
-    : servicesCatalogCache?.filter((item) => item.id !== id) ?? null;
-
-  return { success: true };
+export function archiveService(id: string) {
+  return archiveCatalogItem('service', id);
 }
 
-export async function setPackageActive(id: string, isActive: boolean) {
-  if (!supabase) {
-    return { message: 'Supabase is not connected yet.', success: false };
-  }
-
-  if (!isActive) {
-    const { count, error: bookingCountError } = await supabase
-      .from('bookings')
-      .select('id', { count: 'exact', head: true })
-      .eq('package_id', id);
-
-    if (bookingCountError) {
-      return { message: bookingCountError.message, success: false };
-    }
-
-    if ((count ?? 0) > 0) {
-      return {
-        message: 'This package has existing bookings and cannot be deleted.',
-        success: false,
-      };
-    }
-  }
-
-  const { data, error } = await supabase
-    .from('packages')
-    .update({ is_active: isActive })
-    .eq('id', id)
-    .select('id')
-    .maybeSingle();
-
-  if (error) {
-    return { message: error.message, success: false };
-  }
-
-  if (!data) {
-    return { message: 'No package was updated. Please refresh and try again.', success: false };
-  }
-
-  await createAuditLog({
-    action: isActive ? 'package.activated' : 'package.deactivated',
-    entityId: id,
-    entityType: 'package',
-    metadata: { isActive },
-  });
-
-  adminPackageCatalogCache = adminPackageCatalogCache?.map((item) => (item.id === id ? { ...item, isActive } : item)) ?? null;
-
-  return { success: true };
+export function archivePackage(id: string) {
+  return archiveCatalogItem('package', id);
 }
 
-function mapServiceRow(row: ServiceRow, index: number, packageRows: { service_id: string }[]): ServiceCatalogItem {
+async function archiveCatalogItem(entity: 'service' | 'package', id: string) {
+  if (!supabase) return { success: false, message: 'Supabase is not connected yet.' };
+  try {
+    // The server archives the record, checks booking references and writes its
+    // audit entry in one transaction. Never report an unconfirmed deletion.
+    const { data, error } = await supabase.rpc('archive_catalog_item', { p_entity: entity, p_id: id });
+    if (error) return { success: false, message: error.message };
+    if (data !== true) return { success: false, message: 'No item was deleted. Please reload and try again.' };
+    emitCatalogChanged({ entity, id, isActive: false, isArchived: true });
+    return { success: true };
+  } catch {
+    return { success: false, message: 'Could not delete this item. Please check your connection and try again.' };
+  }
+}
+
+
+
+
+function countPackagesByService(rows: { service_id: string; is_active?: boolean }[], activeOnly = false) {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    if (!activeOnly || row.is_active) counts.set(row.service_id, (counts.get(row.service_id) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function mapServiceRow(row: ServiceRow, index: number, packageCounts: ReadonlyMap<string, number>): ServiceCatalogItem {
   const slug = row.slug ?? 'portrait-photography';
   const fallback = getFallbackServiceBySlug(slug) ?? fallbackServices[index] ?? fallbackServices[0];
   const description = row.description ?? fallback.description;
@@ -519,7 +369,7 @@ function mapServiceRow(row: ServiceRow, index: number, packageRows: { service_id
     isActive: row.is_active,
     minimumNoticeDays: row.minimum_notice_days ?? fallback.minimumNoticeDays,
     name: row.name,
-    packageCount: packageRows.filter((packageRow) => packageRow.service_id === row.id).length,
+    packageCount: packageCounts.get(row.id) ?? 0,
     route: `/services/${slug}`,
     slug,
   };

@@ -1,0 +1,15 @@
+export const adminColors = {
+  canvas: '#F3F6FB',
+  surface: '#FFFFFF',
+  ink: '#172F50',
+  muted: '#65758B',
+  blue: '#2563EB',
+  blueSoft: '#EAF1FF',
+  border: '#E0E7F0',
+  green: '#167858',
+  greenSoft: '#E8F6EF',
+  amber: '#995A12',
+  amberSoft: '#FFF3DE',
+  red: '#B9424B',
+  redSoft: '#FDECEE',
+} as const;

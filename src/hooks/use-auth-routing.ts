@@ -1,80 +1,59 @@
-import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 
+import { supabase } from '@/lib/supabase';
 import { getSignedInUserRole } from '@/services/auth';
 import { type UserRole } from '@/types/auth';
 
-export function useProtectedRole(requiredRole: UserRole) {
-  const [isCheckingRole, setIsCheckingRole] = useState(true);
+type AuthRoutingState = { isLoading: boolean; role: UserRole | null };
+
+// Subscribe once at the root. Stack.Protected owns every auth transition;
+// screens must not replace routes while nested navigators are being removed.
+export function useAuthRoutingState() {
+  const [state, setState] = useState<AuthRoutingState>({ isLoading: Boolean(supabase), role: null });
 
   useEffect(() => {
+    if (!supabase) return;
+
     let isActive = true;
+    let checkVersion = 0;
+    let accountId: string | null | undefined;
 
-    async function checkRole() {
-      setIsCheckingRole(true);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!isActive) return;
+      const nextAccountId = session?.user.id ?? null;
 
-      const role = await getSignedInUserRole().catch(() => null);
-
-      if (!isActive) {
+      if (event === 'SIGNED_OUT' || !nextAccountId) {
+        checkVersion += 1;
+        accountId = null;
+        setState({ isLoading: false, role: null });
         return;
       }
 
-      if (!role) {
-        setIsCheckingRole(false);
-        router.replace('/login');
-        return;
-      }
+      if (accountId === nextAccountId) return;
+      accountId = nextAccountId;
+      const requestVersion = ++checkVersion;
+      // Revoke the old account's access without replacing the root navigator.
+      setState((previous) => ({ isLoading: previous.isLoading, role: null }));
 
-      if (requiredRole === 'admin' && role !== 'admin') {
-        setIsCheckingRole(false);
-        router.replace('/home');
-        return;
-      }
-
-      if (requiredRole === 'client' && role === 'admin') {
-        setIsCheckingRole(false);
-        router.replace('/photographer');
-        return;
-      }
-
-      setIsCheckingRole(false);
-    }
-
-    void checkRole();
+      // Supabase calls must run after the auth callback has released its lock.
+      setTimeout(() => {
+        if (!isActive || requestVersion !== checkVersion) return;
+        void getSignedInUserRole().catch(() => null).then((role) => {
+          if (isActive && requestVersion === checkVersion) {
+            // A failed read must be retryable when Login emits SIGNED_IN again.
+            if (!role) accountId = undefined;
+            setState({ isLoading: false, role });
+          }
+        });
+      }, 0);
+    });
 
     return () => {
       isActive = false;
-    };
-  }, [requiredRole]);
-
-  return isCheckingRole;
-}
-
-export function useRedirectSignedInUser() {
-  useEffect(() => {
-    let isActive = true;
-
-    async function redirectSignedInUser() {
-      const role = await getSignedInUserRole().catch(() => null);
-
-      if (!isActive) {
-        return;
-      }
-
-      if (role === 'admin') {
-        router.replace('/photographer');
-        return;
-      }
-
-      if (role === 'client') {
-        router.replace('/home');
-      }
-    }
-
-    void redirectSignedInUser();
-
-    return () => {
-      isActive = false;
+      checkVersion += 1;
+      subscription.unsubscribe();
     };
   }, []);
+
+  return state;
 }

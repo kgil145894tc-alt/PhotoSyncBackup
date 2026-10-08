@@ -1,28 +1,28 @@
+import { useBottomNavHeight } from '@/hooks/use-bottom-nav-height';
+import { useClientNavScroll as useNavScroll } from '@/hooks/use-client-nav-scroll';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
-import { Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { showAppAlert } from '@/components/app-alert';
 import { AdminBrandHeader } from '@/components/admin-brand-header';
+import { useAdminServiceCatalog } from '@/hooks/use-admin-service-catalog';
+import { useMountedRef } from '@/hooks/use-mounted-ref';
 import {
-  getCachedAdminPackagesCatalog,
-  getCachedAdminServicesCatalog,
-  getAdminPackagesCatalog,
-  getAdminServicesCatalog,
   saveServiceCategory,
   saveServicePackage,
-  setPackageActive,
-  setServiceActive,
+  archivePackage,
+  archiveService,
   type PackageFormValues,
   type ServiceFormValues,
   uploadCatalogImage,
 } from '@/services/service-catalog';
-import { bottomNavMetrics } from '@/styles/navigation.styles';
 import { photographerStyles as styles } from '@/styles/photographer.styles';
+import { adminColors } from '@/styles/admin-theme';
 import { serviceFormStyles as formStyles } from '@/styles/service-form.styles';
 import { type PackageCatalogItem, type ServiceCatalogItem } from '@/types/services';
 
@@ -36,7 +36,17 @@ const thumbnailToneStyles = [
 type ActiveView = 'categories' | 'packages';
 
 export default function PhotographerServicesScreen() {
+  const catalog = useAdminServiceCatalog();
+  // Reset forms, selections and pending actions when account scope changes.
+  return <PhotographerServicesContent key={catalog.accountId ?? 'signed-out'} catalog={catalog} />;
+}
+
+function PhotographerServicesContent({ catalog }: { catalog: ReturnType<typeof useAdminServiceCatalog> }) {
+  const navHeight = useBottomNavHeight('admin');
+  const navScroll = useNavScroll();
   const insets = useSafeAreaInsets();
+  const mounted = useMountedRef();
+  const { services, packages, error, isLoading, isRefreshing, refresh, reconcile: refreshCatalog } = catalog;
   const [activeView, setActiveView] = useState<ActiveView>('categories');
   const [editingPackage, setEditingPackage] = useState<PackageCatalogItem | null>(null);
   const [editingService, setEditingService] = useState<ServiceCatalogItem | null>(null);
@@ -46,57 +56,22 @@ export default function PhotographerServicesScreen() {
   const [isDeletingService, setIsDeletingService] = useState(false);
   const [pendingDeletePackage, setPendingDeletePackage] = useState<PackageCatalogItem | null>(null);
   const [pendingDeleteService, setPendingDeleteService] = useState<ServiceCatalogItem | null>(null);
-  const [packages, setPackages] = useState<PackageCatalogItem[]>(() => getCachedAdminPackagesCatalog() ?? []);
-  const [selectedServiceId, setSelectedServiceId] = useState(() => getCachedAdminServicesCatalog()?.find((service) => service.isActive)?.id ?? '');
-  const [services, setServices] = useState<ServiceCatalogItem[]>(() => getCachedAdminServicesCatalog() ?? []);
-  const bottomPadding = bottomNavMetrics.height + insets.bottom + 24;
-  const activeServices = services.filter((service) => service.isActive);
-  const selectedService = activeServices.find((service) => service.id === selectedServiceId) ?? activeServices[0] ?? null;
-  const visiblePackages = packages.filter((item) => item.isActive && (!selectedService?.id || item.serviceId === selectedService.id));
-
-  async function refreshCatalog() {
-    const [serviceItems, packageItems] = await Promise.all([
-      getAdminServicesCatalog(),
-      getAdminPackagesCatalog(),
-    ]);
-
-    setServices(serviceItems);
-    setPackages(packageItems);
-    setSelectedServiceId((currentId) => (
-      serviceItems.some((service) => service.isActive && service.id === currentId)
-        ? currentId
-        : serviceItems.find((service) => service.isActive)?.id ?? ''
-    ));
-  }
-
-  useEffect(() => {
-    let isMounted = true;
-
-    Promise.all([getAdminServicesCatalog(), getAdminPackagesCatalog()]).then(([serviceItems, packageItems]) => {
-      if (isMounted) {
-        setServices(serviceItems);
-        setPackages(packageItems);
-        setSelectedServiceId((currentId) => (
-          serviceItems.some((service) => service.isActive && service.id === currentId)
-            ? currentId
-            : serviceItems.find((service) => service.isActive)?.id ?? ''
-        ));
-      }
-    });
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  const [selectedServiceId, setSelectedServiceId] = useState('');
+  const bottomPadding = navHeight + insets.bottom + 24;
+  // Admins need inactive records too, so they can edit and reactivate them.
+  // Client visibility is still filtered by the client catalog service.
+  const selectedService = services.find((service) => service.id === selectedServiceId) ?? services[0] ?? null;
+  const visiblePackages = packages.filter((item) => selectedService?.id === item.serviceId);
 
   function openAddForm() {
+    if (isLoading || error) return;
     if (activeView === 'categories') {
       setEditingService(null);
       setIsServiceFormVisible(true);
       return;
     }
 
-    if (!activeServices.length) {
+    if (!services.length) {
       showAppAlert('Add a category first', 'Please create a service category before adding packages.');
       return;
     }
@@ -116,29 +91,15 @@ export default function PhotographerServicesScreen() {
 
     setIsDeletingService(true);
 
-    const result = await setServiceActive(pendingDeleteService.id, false);
+    const result = await archiveService(pendingDeleteService.id);
+
+    if (!mounted.current) return;
 
     if (!result.success) {
       setIsDeletingService(false);
-      showAppAlert('Service not deleted', result.message ?? 'Please try again.');
+      showAppAlert('Service not updated', result.message ?? 'Please try again.');
       return;
     }
-
-    const deletedServiceId = pendingDeleteService.id;
-
-    setServices((currentServices) => {
-      const nextServices = currentServices.map((item) => (
-        item.id === deletedServiceId ? { ...item, isActive: false } : item
-      ));
-
-      setSelectedServiceId((currentId) => (
-        currentId === deletedServiceId
-          ? nextServices.find((item) => item.isActive && item.id !== deletedServiceId)?.id ?? ''
-          : currentId
-      ));
-
-      return nextServices;
-    });
 
     setPendingDeleteService(null);
     setIsDeletingService(false);
@@ -156,7 +117,9 @@ export default function PhotographerServicesScreen() {
 
     setIsDeletingPackage(true);
 
-    const result = await setPackageActive(pendingDeletePackage.id, false);
+    const result = await archivePackage(pendingDeletePackage.id);
+
+    if (!mounted.current) return;
 
     if (!result.success) {
       setIsDeletingPackage(false);
@@ -164,11 +127,6 @@ export default function PhotographerServicesScreen() {
       return;
     }
 
-    const deletedPackageId = pendingDeletePackage.id;
-
-    setPackages((currentPackages) => currentPackages.map((item) => (
-      item.id === deletedPackageId ? { ...item, isActive: false } : item
-    )));
     setPendingDeletePackage(null);
     setIsDeletingPackage(false);
     await refreshCatalog();
@@ -184,16 +142,25 @@ export default function PhotographerServicesScreen() {
       <View
         style={[
           styles.servicesFigmaSurface,
-          { paddingBottom: bottomPadding },
+          { paddingHorizontal: 0, paddingTop: 0 },
         ]}>
-        <Image
-          contentFit="cover"
-          source={require('@/assets/images/admin-calendar-background.png')}
-          style={styles.servicesFigmaBackground}
-        />
-        {activeView === 'packages' ? (
-          <>
-            <View style={styles.servicesPackageHeader}>
+        <FlatList<PackageCatalogItem | ServiceCatalogItem>
+          key={activeView === 'packages' ? 'packages-' + selectedService?.id : 'categories'}
+          {...navScroll}
+          data={activeView === 'packages' ? visiblePackages : services}
+          extraData={catalog}
+          keyExtractor={(item) => item.id}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          alwaysBounceVertical
+          refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => { void refresh(); }} />}
+          contentContainerStyle={{ paddingHorizontal: 18, paddingTop: 17, paddingBottom: bottomPadding }}
+          ItemSeparatorComponent={() => <View style={{ height: activeView === 'packages' ? 15 : 8 }} />}
+          ListHeaderComponent={
+            <>
+            {isLoading || error ? <Text accessibilityLiveRegion="polite" style={styles.servicesCategorySubtitle}>{error ?? 'Loading services...'}</Text> : null}
+            {activeView === 'packages' ? (<View style={styles.servicesPackageHeader}>
               <Pressable
                 accessibilityLabel="Back to service categories"
                 accessibilityRole="button"
@@ -204,81 +171,54 @@ export default function PhotographerServicesScreen() {
               </Pressable>
               <View style={styles.servicesPackageHeaderCopy}>
                 <Text style={styles.servicesPackageTitle}>{selectedService?.name ?? 'Services'}</Text>
-                <Text style={styles.servicesPackageCount}>{formatPackageCount(selectedService?.packageCount ?? visiblePackages.length)}</Text>
+                <Text style={styles.servicesPackageCount}>{formatPackageCount(visiblePackages.length)}</Text>
+                {selectedService && !selectedService.isActive ? (
+                  <Text style={styles.servicesPackageCount}>Service inactive · Hidden from clients</Text>
+                ) : null}
               </View>
               <Pressable
                 accessibilityLabel="Add package"
                 accessibilityRole="button"
+                disabled={isLoading || Boolean(error)}
                 onPress={openAddForm}
                 style={({ pressed }) => [styles.servicesFigmaAddButton, pressed && { opacity: 0.84 }]}>
                 <Text style={styles.servicesFigmaAddText}>+</Text>
               </Pressable>
-            </View>
-
-            <ScrollView
-              bounces={false}
-              contentContainerStyle={styles.servicesPackageList}
-              showsVerticalScrollIndicator={false}
-              style={styles.servicesFigmaListScroller}>
-              {visiblePackages.length ? (
-                visiblePackages.map((item) => (
-                  <AdminPackageItem
-                    item={item}
-                    key={item.id}
-                    onEdit={() => {
-                      setEditingPackage(item);
-                      setIsPackageFormVisible(true);
-                    }}
-                    onToggle={() => deletePackage(item)}
-                    variant="figma"
-                  />
-                ))
-              ) : (
-                <View style={styles.servicesEmptyPackagesCard}>
-                  <EmptyPackagesIcon />
-                  <Text style={styles.servicesEmptyPackagesTitle}>No packages yet</Text>
-                  <Text style={styles.servicesEmptyPackagesText}>Add a package for this service to show it here.</Text>
-                </View>
-              )}
-            </ScrollView>
-          </>
-        ) : (
-          <>
-            <View style={styles.servicesCategoryIntro}>
+            </View>) : (<View style={styles.servicesCategoryIntro}>
               <Text style={styles.servicesCategoryTitle}>Services</Text>
               <Text style={styles.servicesCategorySubtitle}>Manage your service categories and packages.</Text>
               <Pressable
-                accessibilityLabel="Show packages"
+                accessibilityLabel="Add service category"
                 accessibilityRole="button"
+                disabled={isLoading || Boolean(error)}
                 onPress={openAddForm}
                 style={({ pressed }) => [styles.servicesCategoryAddButton, pressed && { opacity: 0.84 }]}>
                 <Text style={styles.servicesCategoryAddText}>+ Add</Text>
               </Pressable>
+            </View>)}
+            <View style={{ height: 16 }} />
+            </>
+          }
+          renderItem={({ item }) => activeView === 'packages' ? (
+            <AdminPackageItem item={item as PackageCatalogItem} variant="figma"
+              onEdit={() => { setEditingPackage(item as PackageCatalogItem); setIsPackageFormVisible(true); }}
+              onToggle={() => deletePackage(item as PackageCatalogItem)} />
+          ) : (
+            <View>
+              <AdminServiceItem service={item as ServiceCatalogItem}
+                onDelete={() => deleteService(item as ServiceCatalogItem)}
+                onEdit={() => { setEditingService(item as ServiceCatalogItem); setIsServiceFormVisible(true); }}
+                onOpen={() => { setSelectedServiceId(item.id); setActiveView('packages'); }} />
             </View>
-
-            <ScrollView
-              bounces={false}
-              contentContainerStyle={styles.servicesCategoryFigmaList}
-              showsVerticalScrollIndicator={false}
-              style={styles.servicesFigmaListScroller}>
-              {activeServices.map((service) => (
-                <AdminServiceItem
-                  key={service.id}
-                  onDelete={() => deleteService(service)}
-                  onEdit={() => {
-                    setEditingService(service);
-                    setIsServiceFormVisible(true);
-                  }}
-                  onOpen={() => {
-                    setSelectedServiceId(service.id);
-                    setActiveView('packages');
-                  }}
-                  service={service}
-                />
-              ))}
-            </ScrollView>
-          </>
-        )}
+          )}
+          ListEmptyComponent={!isLoading && !error ? (
+            <View style={styles.servicesEmptyPackagesCard}>
+              {activeView === 'packages' ? <EmptyPackagesIcon /> : null}
+              <Text style={styles.servicesEmptyPackagesTitle}>{activeView === 'packages' ? 'No packages yet' : 'No services yet'}</Text>
+              <Text style={styles.servicesEmptyPackagesText}>{activeView === 'packages' ? 'Add a package for this service to show it here.' : 'Add a service category to get started.'}</Text>
+            </View>
+          ) : null}
+        />
       </View>
 
       <ServiceFormModal
@@ -286,6 +226,7 @@ export default function PhotographerServicesScreen() {
         onClose={() => setIsServiceFormVisible(false)}
         onSaved={refreshCatalog}
         service={editingService}
+        services={services}
         visible={isServiceFormVisible}
       />
       <PackageFormModal
@@ -294,7 +235,7 @@ export default function PhotographerServicesScreen() {
         lockedServiceId={activeView === 'packages' ? selectedService?.id ?? null : null}
         onClose={() => setIsPackageFormVisible(false)}
         onSaved={refreshCatalog}
-        services={activeServices}
+        services={services}
         visible={isPackageFormVisible}
       />
       <DeleteServiceModal
@@ -339,7 +280,7 @@ function DeletePackageModal({
           <Text style={formStyles.confirmTitle}>Delete package?</Text>
           <Text style={formStyles.confirmMessage}>
             {packageItem
-              ? `This will remove ${packageItem.name} from this service. Packages with existing bookings cannot be deleted.`
+              ? `${packageItem.name} will be removed from your catalog. To temporarily turn it off, cancel and use the Active switch in Edit. Packages with existing bookings cannot be deleted.`
               : ''}
           </Text>
           <View style={formStyles.confirmActions}>
@@ -382,7 +323,7 @@ function DeleteServiceModal({
           <Text style={formStyles.confirmTitle}>Delete service?</Text>
           <Text style={formStyles.confirmMessage}>
             {service
-              ? `This will remove ${service.name} from your active services. Services with existing bookings cannot be deleted.`
+              ? `${service.name} and its packages will be removed from your catalog. To temporarily turn it off, cancel and use the Active switch in Edit. Services with existing bookings cannot be deleted.`
               : ''}
           </Text>
           <View style={formStyles.confirmActions}>
@@ -420,18 +361,22 @@ function AdminServiceItem({
 }) {
   return (
     <View style={styles.servicesCategoryFigmaCard}>
-      <Pressable accessibilityRole="button" onPress={onOpen} style={styles.servicesCategoryFigmaOpenArea}>
+      <Pressable accessibilityRole="button" accessibilityLabel={`${service.name}${service.isActive ? '' : ', inactive'}`}
+        onPress={onOpen} style={styles.servicesCategoryFigmaOpenArea}>
         <Image contentFit="cover" source={service.image} style={styles.servicesCategoryFigmaImage} />
         <View style={styles.servicesCategoryFigmaCopy}>
-          <Text numberOfLines={1} style={styles.servicesCategoryFigmaName}>{service.name}</Text>
-          <Text style={styles.servicesCategoryFigmaCount}>{formatServiceCount(service.packageCount)}</Text>
+          <Text style={styles.servicesCategoryFigmaName}>{service.name}</Text>
+          <Text style={styles.servicesCategoryFigmaCount}>{formatPackageCount(service.packageCount)}</Text>
+          {!service.isActive ? (
+            <Text style={styles.servicesCategoryFigmaCount}>Inactive · Edit to enable</Text>
+          ) : null}
         </View>
       </Pressable>
       <View style={styles.servicesCategoryFigmaActions}>
-        <Pressable accessibilityLabel={`Edit ${service.name}`} accessibilityRole="button" hitSlop={8} onPress={onEdit}>
+        <Pressable accessibilityLabel={`Edit ${service.name}`} accessibilityRole="button" style={styles.adminCatalogEditButton} onPress={onEdit}>
           <ServiceEditIcon />
         </Pressable>
-        <Pressable accessibilityLabel={`Delete ${service.name}`} accessibilityRole="button" hitSlop={8} onPress={onDelete}>
+        <Pressable accessibilityLabel={`Delete ${service.name}`} accessibilityRole="button" style={styles.adminCatalogDeleteButton} onPress={onDelete}>
           <ServiceDeleteIcon />
         </Pressable>
       </View>
@@ -455,22 +400,25 @@ function AdminPackageItem({
       <View style={styles.servicesPackageCard}>
         <Image contentFit="cover" source={item.image} style={styles.servicesPackageImage} />
         <View style={styles.servicesPackageCopy}>
-          <Text numberOfLines={1} style={styles.servicesPackageName}>{item.name}</Text>
+          <Text style={styles.servicesPackageName}>{item.name}</Text>
           <Text style={styles.servicesPackagePrice}>{item.price}</Text>
+          {!item.isActive ? (
+            <Text style={styles.servicesPackagePrice}>Inactive · Edit to enable</Text>
+          ) : null}
           <View style={styles.servicesInclusionList}>
             {item.inclusions.slice(0, 6).map((inclusion, index) => (
               <View key={`${item.id}-${index}`} style={styles.servicesInclusionRow}>
                 <View style={styles.servicesInclusionDot} />
-                <Text numberOfLines={1} style={styles.servicesInclusionText}>{inclusion}</Text>
+                <Text style={styles.servicesInclusionText}>{inclusion}</Text>
               </View>
             ))}
           </View>
         </View>
         <View style={styles.servicesPackageActions}>
-          <Pressable accessibilityLabel="Edit package" accessibilityRole="button" hitSlop={8} onPress={onEdit}>
+          <Pressable accessibilityLabel="Edit package" accessibilityRole="button" style={styles.adminCatalogEditButton} onPress={onEdit}>
             <ServiceEditIcon />
           </Pressable>
-          <Pressable accessibilityLabel={item.isActive ? 'Deactivate package' : 'Activate package'} accessibilityRole="button" hitSlop={8} onPress={onToggle}>
+          <Pressable accessibilityLabel="Delete package" accessibilityRole="button" style={styles.adminCatalogDeleteButton} onPress={onToggle}>
             <ServiceDeleteIcon />
           </Pressable>
         </View>
@@ -494,7 +442,7 @@ function AdminPackageItem({
           <Text style={styles.serviceManageText}>Edit</Text>
         </Pressable>
         <Pressable accessibilityRole="button" onPress={onToggle} style={styles.serviceManageButton}>
-          <Text style={styles.serviceManageText}>{item.isActive ? 'Off' : 'On'}</Text>
+          <Text style={styles.serviceManageText}>Delete</Text>
         </Pressable>
       </View>
     </View>
@@ -505,19 +453,22 @@ function ServiceFormModal({
   onClose,
   onSaved,
   service,
+  services,
   visible,
 }: {
   onClose: () => void;
   onSaved: () => Promise<void>;
   service: ServiceCatalogItem | null;
+  services: ServiceCatalogItem[];
   visible: boolean;
 }) {
-  const insets = useSafeAreaInsets();
-  const isKeyboardVisible = useKeyboardVisible();
+  const mounted = useMountedRef();
   const [basePrice, setBasePrice] = useState(service ? String(service.basePrice) : '');
   const [bufferMinutes, setBufferMinutes] = useState(service?.bufferMinutes ? String(service.bufferMinutes) : '30');
   const [description, setDescription] = useState(service?.description ?? '');
   const [durationHours, setDurationHours] = useState(service?.durationMinutes ? formatDurationHours(service.durationMinutes) : '');
+  const [durationMinutes, setDurationMinutes] = useState(service?.durationMinutes ? formatDurationMinutes(service.durationMinutes) : '');
+  const [formError, setFormError] = useState<string | null>(null);
   const [isActive, setIsActive] = useState(service?.isActive ?? true);
   const [isSaving, setIsSaving] = useState(false);
   const [minimumNoticeDays, setMinimumNoticeDays] = useState(service?.minimumNoticeDays ? String(service.minimumNoticeDays) : '1');
@@ -529,15 +480,24 @@ function ServiceFormModal({
       return;
     }
 
+    setFormError(null);
+
     if (!name.trim()) {
-      showAppAlert('Missing name', 'Please enter a service category name.');
+      setFormError('Please enter a service category name.');
       return;
     }
 
     const generatedSlug = toSlug(name);
 
     if (!generatedSlug) {
-      showAppAlert('Invalid name', 'Please use letters or numbers in the service category name.');
+      setFormError('Please use letters or numbers in the service category name.');
+      return;
+    }
+
+    const hasDuplicateSlug = services.some((item) => item.id !== service?.id && item.slug === generatedSlug);
+
+    if (hasDuplicateSlug) {
+      setFormError('A service with this name already exists. Please use a different service name.');
       return;
     }
 
@@ -545,8 +505,11 @@ function ServiceFormModal({
 
     const uploadedImageUrl = await uploadPickedImage(pickedImage);
 
+    if (!mounted.current) return;
+
     if (uploadedImageUrl === false) {
       setIsSaving(false);
+      setFormError('The image could not be uploaded. Please check your Supabase Storage setup and try again.');
       return;
     }
 
@@ -554,7 +517,7 @@ function ServiceFormModal({
       basePrice: Number(basePrice || 0),
       bufferMinutes: bufferMinutes ? Math.round(Number(bufferMinutes)) : 0,
       description,
-      durationMinutes: durationHours ? Math.round(Number(durationHours) * 60) : null,
+      durationMinutes: getDurationTotalMinutes(durationHours, durationMinutes),
       id: service?.id,
       imageUrl: uploadedImageUrl ?? service?.imageUrl ?? null,
       isActive,
@@ -564,53 +527,45 @@ function ServiceFormModal({
     };
     const result = await saveServiceCategory(formValues);
 
+    if (!mounted.current) return;
+
     if (!result.success) {
       setIsSaving(false);
-      showAppAlert('Service not saved', result.message ?? 'Please try again.');
+      setFormError(result.message ?? 'Service not saved. Please try again.');
       return;
     }
 
     await onSaved();
+    if (!mounted.current) return;
     setIsSaving(false);
     onClose();
   }
 
   return (
     <Modal animationType="none" onRequestClose={onClose} visible={visible}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0}
-        style={formStyles.screen}>
-        <Image
-          contentFit="cover"
-          source={require('@/assets/images/admin-calendar-background.png')}
-          style={formStyles.background}
-        />
-        <ScrollView
-          bounces={false}
-          contentContainerStyle={[
-            formStyles.scrollContent,
-            {
-              paddingBottom: isKeyboardVisible ? insets.bottom + 160 : insets.bottom + 56,
-              paddingTop: insets.top + 26,
-            },
-          ]}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="interactive"
-          showsVerticalScrollIndicator={false}>
-          <View style={formStyles.header}>
-            <Pressable accessibilityLabel="Close service form" accessibilityRole="button" hitSlop={10} onPress={onClose} style={formStyles.backButton}>
-              <ServiceBackIcon />
-            </Pressable>
-            <Text style={formStyles.headerTitle}>{service ? 'Edit Service' : 'Add New Service'}</Text>
-          </View>
-
+      <CatalogFormLayout
+        closeLabel="Close service form"
+        formError={formError}
+        isSaving={isSaving}
+        onClose={onClose}
+        onSave={handleSave}
+        saveLabel="Save Service"
+        title={service ? 'Edit Service' : 'Add New Service'}
+        visible={visible}>
+        <View style={formStyles.sectionCard}>
           <FormInput label="Service Name" onChangeText={setName} required value={name} />
           <FormInput label="Description" multiline onChangeText={setDescription} value={description} />
           <FormInput keyboardType="numeric" label="Base Price" onChangeText={setBasePrice} required value={basePrice} />
-          <FormInput keyboardType="numeric" label="Duration Hours" onChangeText={setDurationHours} value={durationHours} />
+        </View>
+        <View style={formStyles.sectionCard}>
+          <View style={formStyles.fieldRow}>
+            <FormInput compact keyboardType="numeric" label="Duration Hours" onChangeText={setDurationHours} value={durationHours} />
+            <FormInput compact keyboardType="numeric" label="Duration Minutes" onChangeText={setDurationMinutes} value={durationMinutes} />
+          </View>
           <FormInput keyboardType="numeric" label="Preparation Time (minutes)" onChangeText={setBufferMinutes} value={bufferMinutes} />
           <FormInput keyboardType="numeric" label="Minimum Notice (days)" onChangeText={setMinimumNoticeDays} value={minimumNoticeDays} />
+        </View>
+        <View style={formStyles.sectionCard}>
           <ImagePickerField
             fallbackSource={service?.image}
             imageUrl={service?.imageUrl}
@@ -619,9 +574,8 @@ function ServiceFormModal({
             onPick={setPickedImage}
           />
           <ActiveToggle isActive={isActive} onPress={() => setIsActive((value) => !value)} />
-          <FormActions isSaving={isSaving} onCancel={onClose} onSave={handleSave} saveLabel="Save Service" />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </View>
+      </CatalogFormLayout>
     </Modal>
   );
 }
@@ -641,10 +595,10 @@ function PackageFormModal({
   services: ServiceCatalogItem[];
   visible: boolean;
 }) {
-  const insets = useSafeAreaInsets();
-  const isKeyboardVisible = useKeyboardVisible();
+  const mounted = useMountedRef();
   const [badge, setBadge] = useState(item?.badge ?? '');
   const [inclusions, setInclusions] = useState(item?.inclusions.length ? item.inclusions : ['']);
+  const [formError, setFormError] = useState<string | null>(null);
   const [isActive, setIsActive] = useState(item?.isActive ?? true);
   const [isCategoryPickerOpen, setIsCategoryPickerOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -660,8 +614,10 @@ function PackageFormModal({
       return;
     }
 
+    setFormError(null);
+
     if (!name.trim() || !serviceId) {
-      showAppAlert('Missing package details', 'Please enter a package name and choose a category.');
+      setFormError('Please enter a package name and choose a category.');
       return;
     }
 
@@ -669,8 +625,11 @@ function PackageFormModal({
 
     const uploadedImageUrl = await uploadPickedImage(pickedImage);
 
+    if (!mounted.current) return;
+
     if (uploadedImageUrl === false) {
       setIsSaving(false);
+      setFormError('The image could not be uploaded. Please check your Supabase Storage setup and try again.');
       return;
     }
 
@@ -688,13 +647,16 @@ function PackageFormModal({
     };
     const result = await saveServicePackage(formValues);
 
+    if (!mounted.current) return;
+
     if (!result.success) {
       setIsSaving(false);
-      showAppAlert('Package not saved', result.message ?? 'Please try again.');
+      setFormError(result.message ?? 'Package not saved. Please try again.');
       return;
     }
 
     await onSaved();
+    if (!mounted.current) return;
     setIsSaving(false);
     onClose();
   }
@@ -713,57 +675,42 @@ function PackageFormModal({
 
   return (
     <Modal animationType="none" onRequestClose={onClose} visible={visible}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0}
-        style={formStyles.screen}>
-        <Image
-          contentFit="cover"
-          source={require('@/assets/images/admin-calendar-background.png')}
-          style={formStyles.background}
-        />
-        <ScrollView
-          bounces={false}
-          contentContainerStyle={[
-            formStyles.scrollContent,
-            {
-              paddingBottom: isKeyboardVisible ? insets.bottom + 180 : insets.bottom + 56,
-              paddingTop: insets.top + 26,
-            },
-          ]}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="interactive"
-          showsVerticalScrollIndicator={false}>
-          <View style={formStyles.header}>
-            <Pressable accessibilityLabel="Close package form" accessibilityRole="button" hitSlop={10} onPress={onClose} style={formStyles.backButton}>
-              <ServiceBackIcon />
-            </Pressable>
-            <Text style={formStyles.headerTitle}>{item ? 'Edit Package' : 'Add New Package'}</Text>
-          </View>
-
+      <CatalogFormLayout
+        closeLabel="Close package form"
+        formError={formError}
+        isSaving={isSaving}
+        onClose={onClose}
+        onSave={handleSave}
+        saveLabel="Save Package"
+        title={item ? 'Edit Package' : 'Add New Package'}
+        visible={visible}>
+        <View style={formStyles.sectionCard}>
           {isCategoryLocked ? (
             <View style={formStyles.field}>
               <Text style={formStyles.label}>Category</Text>
               <View style={formStyles.lockedInput}>
-                <Text numberOfLines={1} style={formStyles.inputText}>{selectedService?.name ?? 'Selected category'}</Text>
+                <Text style={formStyles.inputText}>{selectedService?.name ?? 'Selected category'}</Text>
               </View>
             </View>
           ) : (
             <View style={formStyles.dropdownField}>
               <Text style={formStyles.label}>Select Category <Text style={formStyles.required}>*</Text></Text>
               <Pressable
+                accessibilityLabel="Select Category"
                 accessibilityRole="button"
+                accessibilityState={{ expanded: isCategoryPickerOpen }}
                 onPress={() => setIsCategoryPickerOpen((value) => !value)}
-                style={formStyles.selectInput}>
-                <Text numberOfLines={1} style={formStyles.inputText}>{selectedService?.name ?? 'Select category'}</Text>
-                <ChevronDownIcon />
+                style={({ pressed }) => [formStyles.selectInput, isCategoryPickerOpen && formStyles.selectInputOpen, pressed && formStyles.pressed]}>
+                <Text style={formStyles.inputText}>{selectedService?.name ?? 'Select category'}</Text>
+                <View style={isCategoryPickerOpen && formStyles.chevronOpen}><ChevronDownIcon /></View>
               </Pressable>
               {isCategoryPickerOpen ? (
                 <View style={formStyles.categoryList}>
-                  <ScrollView bounces={false} nestedScrollEnabled style={formStyles.categoryMenu}>
+                  <ScrollView bounces={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled style={formStyles.categoryMenu}>
                     {services.map((service) => (
                       <Pressable
                         accessibilityRole="button"
+                        accessibilityState={{ selected: serviceId === service.id }}
                         key={service.id}
                         onPress={() => {
                           setServiceId(service.id);
@@ -784,6 +731,8 @@ function PackageFormModal({
           <FormInput label="Service Name" onChangeText={setName} required value={name} />
           <FormInput keyboardType="numeric" label="Price" onChangeText={setPriceAmount} required value={priceAmount} />
           <FormInput label="Badge" onChangeText={setBadge} value={badge} />
+        </View>
+        <View style={formStyles.sectionCard}>
           <ImagePickerField
             fallbackSource={item?.image}
             imageUrl={item?.imageUrl}
@@ -791,54 +740,92 @@ function PackageFormModal({
             pickedImage={pickedImage}
             onPick={setPickedImage}
           />
-
+        </View>
+        <View style={formStyles.sectionCard}>
           <View style={formStyles.inclusionsHeader}>
-            <Text style={formStyles.label}>Inclusions</Text>
-            <Pressable accessibilityLabel="Add inclusion" accessibilityRole="button" onPress={addInclusion} style={formStyles.iconButton}>
+            <Text style={[formStyles.label, formStyles.inclusionsLabel]}>Inclusions</Text>
+            <Pressable accessibilityLabel="Add inclusion" accessibilityRole="button" onPress={addInclusion} style={({ pressed }) => [formStyles.iconButton, pressed && formStyles.pressed]}>
               <PlusIcon />
             </Pressable>
           </View>
           {inclusions.map((inclusion, index) => (
             <View key={index} style={formStyles.inclusionRow}>
               <TextInput
+                accessibilityLabel={`Package inclusion ${index + 1}`}
                 onChangeText={(value) => updateInclusion(index, value)}
                 placeholder="Package inclusion"
                 placeholderTextColor="#8AA3C3"
                 style={formStyles.inclusionInput}
                 value={inclusion}
               />
-              <Pressable accessibilityLabel="Remove inclusion" accessibilityRole="button" onPress={() => removeInclusion(index)} style={formStyles.removeInclusionButton}>
+              <Pressable accessibilityLabel="Remove inclusion" accessibilityRole="button" onPress={() => removeInclusion(index)} style={({ pressed }) => [formStyles.removeInclusionButton, pressed && formStyles.pressed]}>
                 <MinusIcon />
               </Pressable>
             </View>
           ))}
 
           <ActiveToggle isActive={isActive} onPress={() => setIsActive((value) => !value)} />
-          <FormActions isSaving={isSaving} onCancel={onClose} onSave={handleSave} saveLabel="Save Package" />
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </View>
+      </CatalogFormLayout>
     </Modal>
   );
 }
 
-function useKeyboardVisible() {
-  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+function CatalogFormLayout({
+  children,
+  closeLabel,
+  formError,
+  isSaving,
+  onClose,
+  onSave,
+  saveLabel,
+  title,
+  visible,
+}: {
+  children: ReactNode;
+  closeLabel: string;
+  formError: string | null;
+  isSaving: boolean;
+  onClose: () => void;
+  onSave: () => void;
+  saveLabel: string;
+  title: string;
+  visible: boolean;
+}) {
+  const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
-    const showSubscription = Keyboard.addListener('keyboardDidShow', () => {
-      setIsKeyboardVisible(true);
-    });
-    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
-      setIsKeyboardVisible(false);
-    });
+    if (formError) scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [formError]);
 
-    return () => {
-      showSubscription.remove();
-      hideSubscription.remove();
-    };
-  }, []);
-
-  return isKeyboardVisible;
+  return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={0}
+      style={formStyles.screen}>
+      {visible ? <StatusBar style="dark" /> : null}
+      <View style={[formStyles.header, { paddingTop: insets.top + 16, paddingLeft: Math.max(insets.left, 16), paddingRight: Math.max(insets.right, 16) }]}>
+        <Pressable accessibilityLabel={closeLabel} accessibilityRole="button" onPress={onClose} style={({ pressed }) => [formStyles.backButton, pressed && formStyles.pressed]}>
+          <ServiceBackIcon />
+        </Pressable>
+        <Text accessibilityRole="header" style={formStyles.headerTitle}>{title}</Text>
+      </View>
+      <ScrollView
+        ref={scrollRef}
+        bounces={false}
+        contentContainerStyle={[formStyles.scrollContent, { paddingLeft: Math.max(insets.left, 16), paddingRight: Math.max(insets.right, 16) }]}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        showsVerticalScrollIndicator={false}>
+        {formError ? <FormError message={formError} /> : null}
+        {children}
+      </ScrollView>
+      <View style={[formStyles.footer, { paddingBottom: Math.max(insets.bottom, 16), paddingLeft: Math.max(insets.left, 16), paddingRight: Math.max(insets.right, 16) }]}>
+        <FormActions isSaving={isSaving} onCancel={onClose} onSave={onSave} saveLabel={saveLabel} />
+      </View>
+    </KeyboardAvoidingView>
+  );
 }
 
 function ImagePickerField({
@@ -880,9 +867,12 @@ function ImagePickerField({
     <View>
       <Text style={formStyles.label}>{label}</Text>
       <View style={formStyles.photoRow}>
-        <Pressable accessibilityRole="button" onPress={pickImage} style={formStyles.photoBox}>
+        <Pressable accessibilityLabel={label} accessibilityRole="button" onPress={pickImage} style={({ pressed }) => [formStyles.photoBox, previewSource && formStyles.photoBoxWithPreview, pressed && formStyles.pressed]}>
           {previewSource ? (
-            <Image contentFit="cover" source={previewSource} style={formStyles.photoPreview} />
+            <>
+              <Image contentFit="cover" source={previewSource} style={formStyles.photoPreview} />
+              <View pointerEvents="none" style={formStyles.photoEditBadge}><CameraIcon /></View>
+            </>
           ) : (
             <>
               <CameraIcon />
@@ -899,6 +889,7 @@ function ImagePickerField({
 }
 
 function FormInput({
+  compact = false,
   keyboardType,
   label,
   multiline = false,
@@ -906,6 +897,7 @@ function FormInput({
   required = false,
   value,
 }: {
+  compact?: boolean;
   keyboardType?: 'default' | 'numeric';
   label: string;
   multiline?: boolean;
@@ -914,13 +906,14 @@ function FormInput({
   value: string;
 }) {
   return (
-    <View style={formStyles.field}>
+    <View style={[formStyles.field, compact && formStyles.compactField]}>
       <Text style={formStyles.label}>{label} {required ? <Text style={formStyles.required}>*</Text> : null}</Text>
       <TextInput
+        accessibilityLabel={label}
         keyboardType={keyboardType}
         multiline={multiline}
         onChangeText={onChangeText}
-        placeholderTextColor="#8AA3C3"
+        placeholderTextColor={adminColors.muted}
         style={[formStyles.input, multiline && formStyles.textarea]}
         value={value}
       />
@@ -928,9 +921,17 @@ function FormInput({
   );
 }
 
+function FormError({ message }: { message: string }) {
+  return (
+    <View accessibilityRole="alert" style={formStyles.errorBox}>
+      <Text style={formStyles.errorText}>{message}</Text>
+    </View>
+  );
+}
+
 function ActiveToggle({ isActive, onPress }: { isActive: boolean; onPress: () => void }) {
   return (
-    <Pressable accessibilityRole="switch" accessibilityState={{ checked: isActive }} onPress={onPress} style={formStyles.activeRow}>
+    <Pressable accessibilityLabel={isActive ? 'Active' : 'Inactive'} accessibilityRole="switch" accessibilityState={{ checked: isActive }} onPress={onPress} style={({ pressed }) => [formStyles.activeRow, pressed && formStyles.pressed]}>
       <View style={[formStyles.activeSwitchTrack, isActive && formStyles.activeSwitchTrackOn]}>
         <View style={[formStyles.activeSwitchThumb, isActive && formStyles.activeSwitchThumbOn]} />
       </View>
@@ -952,10 +953,11 @@ function FormActions({
 }) {
   return (
     <View style={formStyles.actionRow}>
-      <Pressable accessibilityRole="button" onPress={onCancel} style={formStyles.cancelButton}>
+      <Pressable accessibilityRole="button" onPress={onCancel} style={({ pressed }) => [formStyles.cancelButton, pressed && formStyles.pressed]}>
         <Text style={formStyles.cancelText}>Cancel</Text>
       </Pressable>
-      <Pressable accessibilityRole="button" disabled={isSaving} onPress={onSave} style={[formStyles.saveButton, isSaving && { opacity: 0.72 }]}>
+      <Pressable accessibilityRole="button" accessibilityState={{ busy: isSaving, disabled: isSaving }} disabled={isSaving} onPress={onSave} style={({ pressed }) => [formStyles.saveButton, (isSaving || pressed) && formStyles.pressed]}>
+        {isSaving ? <ActivityIndicator color={adminColors.surface} size="small" /> : null}
         <Text style={formStyles.saveText}>{isSaving ? 'Saving...' : saveLabel}</Text>
       </Pressable>
     </View>
@@ -974,7 +976,6 @@ async function uploadPickedImage(pickedImage: ImagePicker.ImagePickerAsset | nul
   });
 
   if (!result.success) {
-    showAppAlert('Image not uploaded', result.message ?? 'Please check your Supabase Storage setup.');
     return false;
   }
 
@@ -986,17 +987,27 @@ function toSlug(value: string) {
 }
 
 function formatDurationHours(durationMinutes: number) {
-  const hours = durationMinutes / 60;
+  const hours = Math.floor(durationMinutes / 60);
 
-  return Number.isInteger(hours) ? String(hours) : String(Number(hours.toFixed(2)));
+  return hours > 0 ? String(hours) : '';
+}
+
+function formatDurationMinutes(durationMinutes: number) {
+  const minutes = durationMinutes % 60;
+
+  return minutes > 0 ? String(minutes) : '';
+}
+
+function getDurationTotalMinutes(hoursValue: string, minutesValue: string) {
+  const hours = Number(hoursValue || 0);
+  const minutes = Number(minutesValue || 0);
+  const totalMinutes = Math.round(hours * 60) + Math.round(minutes);
+
+  return totalMinutes > 0 ? totalMinutes : null;
 }
 
 function formatPackageCount(count: number) {
   return `${count} ${count === 1 ? 'package' : 'packages'}`;
-}
-
-function formatServiceCount(count: number) {
-  return `${count} ${count === 1 ? 'service' : 'services'}`;
 }
 
 function ServiceBackIcon() {

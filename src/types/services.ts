@@ -2,6 +2,13 @@ import { type ImageSource } from 'expo-image';
 
 export type ServiceSlug = string;
 
+export type ServiceHighlight = {
+  id: string;
+  imageUrl: string;
+  name: string;
+  slug: ServiceSlug;
+};
+
 export type ServiceCatalogItem = {
   basePrice: number;
   bufferMinutes: number | null;
@@ -40,4 +47,14 @@ export type PackageCatalogItem = {
   priceAmount: number;
   serviceId: string;
   top: number;
+};
+
+export type AdminServiceCatalog = {
+  packages: PackageCatalogItem[];
+  services: ServiceCatalogItem[];
+};
+
+export type ClientServiceCatalog = {
+  packages: PackageCatalogItem[];
+  services: ServiceCatalogItem[];
 };

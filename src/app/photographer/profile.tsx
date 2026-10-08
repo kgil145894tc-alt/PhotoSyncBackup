@@ -1,10 +1,14 @@
+import { useBottomNavHeight } from '@/hooks/use-bottom-nav-height';
+import { useClientNavScroll as useNavScroll } from '@/hooks/use-client-nav-scroll';
+import { useAdminStudioSettings } from '@/hooks/use-admin-studio-settings';
+import { useMountedRef } from '@/hooks/use-mounted-ref';
 import { Image } from "expo-image";
-import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   Text,
   TextInput,
@@ -15,16 +19,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
 
 import { LogoutConfirmationModal } from "@/components/logout-confirmation-modal";
+import { AdminBrandHeader } from "@/components/admin-brand-header";
 import { signOutPhotoSync } from "@/services/auth";
 import {
   formatBusinessHours,
   formatEditableWorkingTime,
-  getStudioSettings,
   parseWorkingTimeInput,
-  saveStudioSettings,
   type StudioSettings,
 } from "@/services/studio-settings";
-import { bottomNavMetrics } from "@/styles/navigation.styles";
 import { photographerStyles as styles } from "@/styles/photographer.styles";
 
 type StudioSettingsNotice = {
@@ -44,46 +46,44 @@ type ComparableStudioSettings = Pick<
 >;
 
 export default function PhotographerProfileScreen() {
+  const studio = useAdminStudioSettings();
+  return <PhotographerProfileContent key={`${studio.accountId ?? 'signed-out'}:${studio.sessionKey}`} studio={studio} />;
+}
+
+function PhotographerProfileContent({ studio }: { studio: ReturnType<typeof useAdminStudioSettings> }) {
+  const { settings: savedSettings, error, isLoading, isRefreshing, isSaving, refresh, save } = studio;
+  const mounted = useMountedRef();
+  const navHeight = useBottomNavHeight('admin');
+  const navScroll = useNavScroll();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const [contactEmail, setContactEmail] = useState("");
-  const [contactPhone, setContactPhone] = useState("");
-  const [defaultShootLocation, setDefaultShootLocation] = useState("");
+  const [draft, setDraft] = useState<Partial<ComparableStudioSettings>>({});
   const [isLogoutModalVisible, setIsLogoutModalVisible] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
-  const [lastSavedStudioSettings, setLastSavedStudioSettings] = useState<ComparableStudioSettings | null>(null);
-  const [studioAddress, setStudioAddress] = useState("");
   const [studioSettingsNotice, setStudioSettingsNotice] = useState<StudioSettingsNotice | null>(null);
-  const [studioName, setStudioName] = useState("PhotoSync Studio");
-  const [workingEndTime, setWorkingEndTime] = useState("5:00 PM");
-  const [workingStartTime, setWorkingStartTime] = useState("8:00 AM");
-  const profileWidth = Math.min(width, 412);
-  const bottomPadding = bottomNavMetrics.height + insets.bottom + 24;
+  const { contactEmail, contactPhone, defaultShootLocation, studioAddress, studioName, workingEndTime, workingStartTime } = {
+    contactEmail: savedSettings?.contactEmail ?? '',
+    contactPhone: savedSettings?.contactPhone ?? '',
+    defaultShootLocation: savedSettings?.defaultShootLocation ?? '',
+    studioAddress: savedSettings?.studioAddress ?? '',
+    studioName: savedSettings?.studioName ?? 'PhotoSync Studio',
+    workingEndTime: formatEditableWorkingTime(savedSettings?.workingEndTime ?? '17:00:00'),
+    workingStartTime: formatEditableWorkingTime(savedSettings?.workingStartTime ?? '08:00:00'),
+    ...draft,
+  };
+  const canEdit = Boolean(savedSettings && studio.accountId && !isSaving && !isSigningOut);
+  const profileWidth = Math.min(width, 640);
+  const bottomPadding = navHeight + insets.bottom + 24;
 
-  useEffect(() => {
-    let isMounted = true;
-
-    getStudioSettings().then((settings) => {
-      if (isMounted) {
-        setStudioName(settings.studioName);
-        setStudioAddress(settings.studioAddress);
-        setContactPhone(settings.contactPhone);
-        setContactEmail(settings.contactEmail);
-        setDefaultShootLocation(settings.defaultShootLocation);
-        setWorkingStartTime(formatEditableWorkingTime(settings.workingStartTime));
-        setWorkingEndTime(formatEditableWorkingTime(settings.workingEndTime));
-        setLastSavedStudioSettings(normalizeStudioSettingsForComparison(settings));
-      }
-    });
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  function updateField(field: keyof ComparableStudioSettings, value: string) {
+    if (!canEdit) return;
+    // Keep only edited fields in the draft. Background reads can update the
+    // other fields without replacing text the administrator is typing.
+    setDraft((previous) => ({ ...previous, [field]: value }));
+  }
 
   async function handleSave() {
-    if (isSaving) {
+    if (!canEdit || !savedSettings) {
       return;
     }
 
@@ -126,7 +126,7 @@ export default function PhotographerProfileScreen() {
     };
     const normalizedSettings = normalizeStudioSettingsForComparison(settings);
 
-    if (lastSavedStudioSettings && areStudioSettingsEqual(normalizedSettings, lastSavedStudioSettings)) {
+    if (areStudioSettingsEqual(normalizedSettings, normalizeStudioSettingsForComparison(savedSettings))) {
       setStudioSettingsNotice({
         message: "Your studio information is already up to date.",
         title: "No changes to save",
@@ -134,9 +134,8 @@ export default function PhotographerProfileScreen() {
       return;
     }
 
-    setIsSaving(true);
-    const result = await saveStudioSettings(settings);
-    setIsSaving(false);
+    const result = await save(settings);
+    if (!mounted.current) return;
 
     if (!result.success) {
       setStudioSettingsNotice({
@@ -146,9 +145,7 @@ export default function PhotographerProfileScreen() {
       return;
     }
 
-    setWorkingStartTime(formatEditableWorkingTime(parsedWorkingStartTime));
-    setWorkingEndTime(formatEditableWorkingTime(parsedWorkingEndTime));
-    setLastSavedStudioSettings(normalizedSettings);
+    setDraft({});
 
     setStudioSettingsNotice({
       message: "Your studio information has been updated.",
@@ -162,34 +159,44 @@ export default function PhotographerProfileScreen() {
     }
 
     setIsSigningOut(true);
-    await signOutPhotoSync();
-    setIsSigningOut(false);
     setIsLogoutModalVisible(false);
-    router.replace("/");
+    try {
+      await signOutPhotoSync();
+    } catch {
+      if (!mounted.current) return;
+      setIsLogoutModalVisible(false);
+      setStudioSettingsNotice({ title: 'Could not sign out', message: 'Please try again.' });
+    } finally {
+      if (mounted.current) setIsSigningOut(false);
+    }
   }
 
   return (
-    <View style={styles.container}>
-      <Image
-        contentFit="cover"
-        source={require("@/assets/images/figma-admin-profile/admin-profile-background.png")}
-        style={styles.adminProfileBackgroundImage}
+    <View style={[styles.container, styles.adminCurvedHeaderScreen]}>
+      <StatusBar style="light" />
+      <AdminBrandHeader
+        textureSource={require("@/assets/images/admin-calendar-banner.png")}
+        topInset={insets.top}
       />
-      <StatusBar style="dark" />
+      <View style={styles.adminCalendarSurface}>
       <ScrollView
-        bounces={false}
+        {...navScroll}
+        alwaysBounceVertical
         contentContainerStyle={[
           styles.adminProfileContent,
           {
             paddingBottom: bottomPadding + 8,
-            paddingTop: insets.top + 20,
+            paddingTop: 17,
             width: profileWidth,
           },
         ]}
         keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => { void refresh(); }} />}
         showsVerticalScrollIndicator={false}
         style={styles.adminProfileScrollView}
       >
+        <Text style={styles.adminPageTitle}>Profile</Text>
+        <Text style={styles.adminPageSubtitle}>Manage your studio information.</Text>
         <View style={styles.simpleProfileHeader}>
           <View style={styles.simpleProfileLogo}>
             <Image
@@ -207,52 +214,66 @@ export default function PhotographerProfileScreen() {
 
         <View style={styles.studioSettingsCard}>
           <Text style={styles.studioSettingsTitle}>Studio Information</Text>
-          <Text style={styles.studioSettingsSubtitle}></Text>
+          <Text style={styles.studioSettingsSubtitle}>Keep your details up to date for every client session.</Text>
 
-          <StudioInput
-            label="Studio Name"
-            onChangeText={setStudioName}
-            value={studioName}
-          />
-          <StudioInput
-            label="Studio Address"
-            multiline
-            onChangeText={setStudioAddress}
-            value={studioAddress}
-          />
-          <StudioInput
-            keyboardType="phone-pad"
-            label="Contact Number"
-            onChangeText={setContactPhone}
-            value={contactPhone}
-          />
-          <StudioInput
-            keyboardType="email-address"
-            label="Contact Email"
-            onChangeText={setContactEmail}
-            value={contactEmail}
-          />
-          <StudioInput
-            label="Default Shoot Location"
-            onChangeText={setDefaultShootLocation}
-            placeholder="Example: PhotoSync Studio"
-            value={defaultShootLocation}
-          />
-          <BusinessHoursInput
-            endTime={workingEndTime}
-            onChangeEndTime={setWorkingEndTime}
-            onChangeStartTime={setWorkingStartTime}
-            startTime={workingStartTime}
-          />
+          {isLoading ? <Text style={styles.adminPageSubtitle}>Loading studio information...</Text> : null}
+          {error ? <Text style={styles.adminPageSubtitle}>{error}</Text> : null}
+          {savedSettings ? (
+            <>
+              <StudioInput
+                editable={canEdit}
+                label="Studio Name"
+                onChangeText={(value) => updateField('studioName', value)}
+                value={studioName}
+              />
+              <StudioInput
+                editable={canEdit}
+                label="Studio Address"
+                multiline
+                onChangeText={(value) => updateField('studioAddress', value)}
+                value={studioAddress}
+              />
+              <Text style={styles.studioSectionHeading}>Client contact</Text>
+              <StudioInput
+                editable={canEdit}
+                keyboardType="phone-pad"
+                label="Contact Number"
+                onChangeText={(value) => updateField('contactPhone', value)}
+                value={contactPhone}
+              />
+              <StudioInput
+                editable={canEdit}
+                keyboardType="email-address"
+                label="Contact Email"
+                onChangeText={(value) => updateField('contactEmail', value)}
+                value={contactEmail}
+              />
+              <Text style={styles.studioSectionHeading}>Session defaults</Text>
+              <StudioInput
+                editable={canEdit}
+                label="Default Shoot Location"
+                onChangeText={(value) => updateField('defaultShootLocation', value)}
+                placeholder="Example: PhotoSync Studio"
+                value={defaultShootLocation}
+              />
+              <BusinessHoursInput
+                editable={canEdit}
+                endTime={workingEndTime}
+                onChangeEndTime={(value) => updateField('workingEndTime', value)}
+                onChangeStartTime={(value) => updateField('workingStartTime', value)}
+                startTime={workingStartTime}
+              />
+            </>
+          ) : null}
 
           <Pressable
             accessibilityLabel="Save studio settings"
             accessibilityRole="button"
-            disabled={isSaving}
+            disabled={!canEdit}
             onPress={handleSave}
             style={({ pressed }) => [
               styles.studioSaveButton,
-              (pressed || isSaving) && { opacity: 0.78 },
+              (pressed || !canEdit) && { opacity: 0.78 },
             ]}
           >
             <Text style={styles.studioSaveText}>
@@ -264,6 +285,7 @@ export default function PhotographerProfileScreen() {
         <Pressable
           accessibilityLabel="Log out"
           accessibilityRole="button"
+          disabled={isSigningOut}
           onPress={() => setIsLogoutModalVisible(true)}
           style={({ pressed }) => [
             styles.simpleLogoutButton,
@@ -274,6 +296,7 @@ export default function PhotographerProfileScreen() {
           <Text style={styles.simpleLogoutText}>Log Out</Text>
         </Pressable>
       </ScrollView>
+      </View>
 
       <LogoutConfirmationModal
         isLoading={isSigningOut}
@@ -329,6 +352,7 @@ export default function PhotographerProfileScreen() {
 }
 
 function StudioInput({
+  editable,
   keyboardType,
   label,
   multiline = false,
@@ -336,6 +360,7 @@ function StudioInput({
   placeholder,
   value,
 }: {
+  editable: boolean;
   keyboardType?: "default" | "email-address" | "phone-pad";
   label: string;
   multiline?: boolean;
@@ -347,6 +372,8 @@ function StudioInput({
     <View style={styles.studioField}>
       <Text style={styles.studioFormLabel}>{label}</Text>
       <TextInput
+        accessibilityLabel={label}
+        editable={editable}
         autoCapitalize={keyboardType === "email-address" ? "none" : "sentences"}
         keyboardType={keyboardType}
         multiline={multiline}
@@ -361,33 +388,41 @@ function StudioInput({
 }
 
 function BusinessHoursInput({
+  editable,
   endTime,
   onChangeEndTime,
   onChangeStartTime,
   startTime,
 }: {
+  editable: boolean;
   endTime: string;
   onChangeEndTime: (value: string) => void;
   onChangeStartTime: (value: string) => void;
   startTime: string;
 }) {
+  const { width, fontScale } = useWindowDimensions();
+  const stackHours = width / fontScale < 300;
   return (
     <View style={styles.studioField}>
       <Text style={styles.studioFormLabel}>Business Hours</Text>
-      <View style={styles.businessHoursInputRow}>
+      <View style={[styles.businessHoursInputRow, stackHours && { flexDirection: 'column', alignItems: 'stretch' }]}>
         <TextInput
+          accessibilityLabel="Business opening time"
+          editable={editable}
           onChangeText={onChangeStartTime}
           placeholder="8:00 AM"
           placeholderTextColor="#8AA3C3"
-          style={[styles.studioFormInput, styles.businessHoursInput]}
+          style={[styles.studioFormInput, styles.businessHoursInput, stackHours && { flex: 0 }]}
           value={startTime}
         />
         <Text style={styles.businessHoursSeparator}>to</Text>
         <TextInput
+          accessibilityLabel="Business closing time"
+          editable={editable}
           onChangeText={onChangeEndTime}
           placeholder="5:00 PM"
           placeholderTextColor="#8AA3C3"
-          style={[styles.studioFormInput, styles.businessHoursInput]}
+          style={[styles.studioFormInput, styles.businessHoursInput, stackHours && { flex: 0 }]}
           value={endTime}
         />
       </View>
@@ -424,14 +459,14 @@ function LogoutIcon() {
     <Svg width={23} height={23} viewBox="0 0 24 24" fill="none">
       <Path
         d="M10 5H6C5.4 5 5 5.4 5 6V18C5 18.6 5.4 19 6 19H10"
-        stroke="#ffffff"
+        stroke="#B9424B"
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth={2.2}
       />
       <Path
         d="M14 8L18 12L14 16M18 12H10"
-        stroke="#ffffff"
+        stroke="#B9424B"
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth={2.2}

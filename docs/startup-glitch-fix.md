@@ -139,6 +139,50 @@ Logout/session cleanup was checked after route guards:
 - `signOutPhotoSync` now only calls `supabase.auth.signOut()` while push notifications are delayed.
 - The app no longer imports `push-notifications` during startup or logout.
 
+## Safe Restore Step 7
+
+Date started: 2026-10-06
+
+Push notifications are being restored carefully after the login flicker fix:
+
+- `src/app/_layout.tsx` must stay minimal. Do not add push, auth listeners, bottom navigation, font loading, or splash gating back into the root layout.
+- `src/components/push-notification-bootstrap.tsx` lazy-loads `src/services/push-notifications.ts` only after a signed-in route group is mounted.
+- `src/app/(client)/_layout.tsx` mounts `PushNotificationBootstrap` only after `useProtectedRole('client')` has finished.
+- `src/app/photographer/_layout.tsx` mounts `PushNotificationBootstrap` only after `useProtectedRole('admin')` has finished.
+- The bootstrap waits briefly before importing `expo-notifications` so login route replacement can settle before permission/token work starts.
+- If the login flicker returns, remove `PushNotificationBootstrap` from the two signed-in layouts first. Do not change root layout as a first response.
+
+Baseline before this step:
+
+- `npx tsc --noEmit` passed.
+- `npx expo lint` passed.
+- `npx expo-doctor` passed 20/21 checks, but reported SDK patch mismatches for `@expo/ui`, `expo`, `expo-constants`, and `expo-router`. Handle those separately with `npx expo install --check` or `npx expo install --fix`.
+
+Verification after the signed-in push bootstrap was added:
+
+- `npx tsc --noEmit` passed.
+- `npx expo lint` passed.
+- `npx expo-doctor` still passed 20/21 checks with the same SDK patch mismatches only. No new doctor issue appeared from this push change.
+
+Follow-up after first device test:
+
+- The notification permission prompt appeared, so the signed-in bootstrap is running.
+- No row appeared in `public.push_tokens`, so `src/services/push-notifications.ts` now returns explicit sync results for permission, Expo token, signed-in user, and Supabase save failures.
+- In development, `src/components/push-notification-bootstrap.tsx` shows a "Push setup needs attention" alert when token creation or Supabase saving fails. Use that message to decide the next fix instead of moving push setup back into root startup.
+- The first alert said Android could not create an Expo push token because Firebase Messaging was not initialized and `googleServicesFile` was missing. Next fix is Firebase Android setup, not a login/router change: create or open a Firebase project, add Android package `com.kirl123.PhotoSync`, download `google-services.json`, add `expo.android.googleServicesFile`, then rebuild the development app.
+- `google-services.json` was added at the project root and matched Android package `com.kirl123.PhotoSync`. `app.json` now points `expo.android.googleServicesFile` to `./google-services.json`.
+- A plain `npx expo run:android` still showed the old Firebase error because the existing generated `android/` folder had not picked up the new config. Running `npx expo prebuild --platform android --no-install` regenerated Android from app config and produced `android/app/google-services.json`, `com.google.gms:google-services`, and `apply plugin: 'com.google.gms.google-services'`.
+- After reinstalling the regenerated Android build, `public.push_tokens` received the device Expo push token. The client-side push registration path is now confirmed working.
+- Logging in as client, logging out, then logging in as admin on the same phone reused the same Expo push token and hit RLS because the row still belonged to the previous user. `signOutPhotoSync` now removes the current device token before sign-out, and `docs/supabase-push-notifications.sql` defines `register_my_push_token` so a signed-in user can safely claim the current device token during account switches.
+
+Remaining push setup outside the app code:
+
+- Run `docs/supabase-push-notifications.sql` in Supabase if it has not been applied yet.
+- Deploy `supabase/functions/send-push-notification`.
+- Configure the insert webhook for `public.notifications`, or call the Edge Function after creating a notification row.
+- Test push delivery in a development or production build, not plain Expo Go.
+- If notification rows and admin push tokens exist but no push arrives, check the webhook URL and function logs first. The linked Supabase project ref is `ywjlbiivyhedsephkhih`, so the webhook URL must be `https://ywjlbiivyhedsephkhih.supabase.co/functions/v1/send-push-notification`. `supabase/config.toml` disables JWT verification for this webhook function because database webhooks may not send a user JWT.
+
 ## Slide Animations Removed
 
 Slide-specific navigation behavior was removed from client and admin navigation:

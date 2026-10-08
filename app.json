@@ -21,6 +21,7 @@
       "permissions": [
         "android.permission.RECORD_AUDIO"
       ],
+      "googleServicesFile": "./google-services.json",
       "package": "com.kirl123.PhotoSync"
     },
     "web": {
@@ -49,7 +50,8 @@
           "image": "./assets/images/photosync-logo.png",
           "imageWidth": 132
         }
-      ]
+      ],
+      "react-native-nitro-google-signin"
     ],
     "experiments": {
       "typedRoutes": true,

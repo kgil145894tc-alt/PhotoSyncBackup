@@ -7,6 +7,8 @@ export const clientUi = {
     ink: '#142C4C',
     muted: '#4C5E76',
     navBlue: '#142C4C',
+    warmAccent: '#C88A55',
+    warmAccentSoft: '#F4DDC8',
   },
   metrics: {
     cardRadius: 10,
@@ -26,7 +28,8 @@ export const clientUiStyles = StyleSheet.create({
   brandHeader: {
     alignItems: 'center',
     backgroundColor: clientUi.colors.navBlue,
-    height: clientUi.metrics.headerHeight,
+    minHeight: clientUi.metrics.headerHeight,
+    paddingBottom: 20,
     justifyContent: 'center',
   },
   brandRow: {
@@ -54,7 +57,8 @@ export const clientUiStyles = StyleSheet.create({
     borderWidth: 1,
     elevation: 3,
     flexDirection: 'row',
-    height: clientUi.metrics.rowHeight,
+    minHeight: clientUi.metrics.rowHeight,
+    paddingVertical: 14,
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     shadowColor: '#000000',
@@ -84,7 +88,9 @@ export const clientUiStyles = StyleSheet.create({
     elevation: 3,
     flexDirection: 'row',
     gap: 8,
-    height: clientUi.metrics.primaryButtonHeight,
+    minHeight: clientUi.metrics.primaryButtonHeight,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     justifyContent: 'center',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 0 },
@@ -97,5 +103,7 @@ export const clientUiStyles = StyleSheet.create({
     fontSize: clientUi.type.buttonSize,
     includeFontPadding: false,
     lineHeight: 22,
+    flexShrink: 1,
+    textAlign: 'center',
   },
 });

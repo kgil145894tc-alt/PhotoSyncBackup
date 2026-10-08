@@ -1,15 +1,16 @@
-import { router, useFocusEffect } from 'expo-router';
+import { useBottomNavHeight } from '@/hooks/use-bottom-nav-height';
+import { useClientNavScroll as useNavScroll } from '@/hooks/use-client-nav-scroll';
+import { router } from 'expo-router';
 import { Image } from 'expo-image';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { FlatList, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { AdminBrandHeader } from '@/components/admin-brand-header';
-import { formatShortBookingDate, getAdminBookingRequests } from '@/services/admin-bookings';
-import { subscribeToBookingsChanged } from '@/services/booking-events';
-import { bottomNavMetrics } from '@/styles/navigation.styles';
+import { usePagedAdminBookings } from '@/hooks/use-paged-admin-bookings';
+import { formatShortBookingDate, formatBookingTimeRange } from '@/services/admin-bookings';
 import { photographerStyles as styles } from '@/styles/photographer.styles';
 import { type AdminBookingRequest, type BookingStatus } from '@/types/admin-bookings';
 
@@ -26,57 +27,20 @@ const requestThumbs = [
 type DateFilter = 'all' | 'today' | 'tomorrow' | 'thisWeek' | 'upcoming';
 
 export default function PhotographerRequestsScreen() {
+  const navHeight = useBottomNavHeight('admin');
+  const navScroll = useNavScroll();
   const insets = useSafeAreaInsets();
   const [activeFilter, setActiveFilter] = useState<'all' | BookingStatus>('pending');
   const [activeDateFilter, setActiveDateFilter] = useState<DateFilter>('all');
-  const [requests, setRequests] = useState<AdminBookingRequest[]>([]);
   const [searchText, setSearchText] = useState('');
-  const bottomPadding = bottomNavMetrics.height + insets.bottom + 24;
-  const filteredRequests = useMemo(
-    () =>
-      requests.filter((request) => {
-        const matchesFilter = activeFilter === 'all' || request.status === activeFilter;
-        const matchesDateFilter = isRequestInDateFilter(request.bookingDate, activeDateFilter);
-        const searchValue = searchText.trim().toLowerCase();
-        const matchesSearch =
-          !searchValue ||
-          request.clientName.toLowerCase().includes(searchValue) ||
-          request.serviceName.toLowerCase().includes(searchValue) ||
-          request.packageName.toLowerCase().includes(searchValue) ||
-          formatShortBookingDate(request.bookingDate).toLowerCase().includes(searchValue);
-
-        return matchesFilter && matchesDateFilter && matchesSearch;
-      }),
-    [activeDateFilter, activeFilter, requests, searchText],
-  );
-  const loadRequests = useCallback(async (isMounted: () => boolean = () => true) => {
-    const items = await getAdminBookingRequests();
-
-    if (isMounted()) {
-      setRequests(items);
-    }
-  }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      let isMounted = true;
-
-      void loadRequests(() => isMounted);
-
-      return () => {
-        isMounted = false;
-      };
-    }, [loadRequests]),
-  );
-
-  useEffect(
-    () =>
-      subscribeToBookingsChanged(() => {
-        void loadRequests();
-      }),
-    [loadRequests],
-  );
-
+  const [search, setSearch] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(searchText.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchText]);
+  const { requests, counts, error, isLoading, isRefreshing, isLoadingMore, hasMore, refresh, loadMore } =
+    usePagedAdminBookings({ status: activeFilter, dateFilter: activeDateFilter, search });
+  const bottomPadding = navHeight + insets.bottom + 24;
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
@@ -86,23 +50,36 @@ export default function PhotographerRequestsScreen() {
           topInset={insets.top}
         />
 
-        <View style={styles.adminRequestsPanel}>
-          <Image
-            contentFit="cover"
-            source={require('@/assets/images/admin-requests-bg.png')}
-            style={styles.adminRequestsPanelBackground}
-          />
+        <View style={[styles.adminRequestsPanel, { paddingHorizontal: 0, paddingTop: 0 }]}>
+          <FlatList
+            {...navScroll}
+            style={{ flex: 1 }}
+            data={requests}
+            keyExtractor={(request) => request.id}
+            initialNumToRender={8}
+            maxToRenderPerBatch={8}
+            windowSize={7}
+            keyboardShouldPersistTaps="handled"
+            refreshing={!isLoading && isRefreshing}
+            onRefresh={refresh}
+            contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 25, paddingBottom: bottomPadding }}
+            ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+            ListHeaderComponent={<View style={{ paddingBottom: 8 }}>
           <Text style={styles.adminRequestsTitle}>Booking Requests</Text>
           <Text style={styles.adminRequestsSubtitle}>Review and manage client booking requests.</Text>
+          {error ? <Text accessibilityRole="alert" style={styles.adminRequestsEmptyText}>{error}</Text> : null}
 
-          <View style={styles.adminRequestsFilterRow}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            style={styles.adminRequestsStatusFilterScroller}
+            contentContainerStyle={styles.adminRequestsFilterRow}>
             {filterOptions.map((filter) => {
               const isActive = activeFilter === filter;
-              const count = filter === 'all' ? requests.length : requests.filter((request) => request.status === filter).length;
+              const count = counts?.[filter];
 
               return (
                 <Pressable
                   accessibilityRole="button"
+                  accessibilityState={{ selected: isActive }}
                   key={filter}
                   onPress={() => setActiveFilter(filter)}
                   style={({ pressed }) => [
@@ -111,12 +88,12 @@ export default function PhotographerRequestsScreen() {
                     pressed && { opacity: 0.82 },
                   ]}>
                   <Text style={[styles.adminRequestsFilterText, isActive && styles.activeAdminRequestsFilterText]}>
-                    {formatFilterLabel(filter)} ({count})
+                    {formatFilterLabel(filter)} ({count ?? '—'})
                   </Text>
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
 
           <View style={styles.adminRequestsSearchRow}>
             <View style={styles.adminRequestsSearchBox}>
@@ -143,18 +120,14 @@ export default function PhotographerRequestsScreen() {
             </Pressable>
           </View>
 
-          <ScrollView
-            bounces={false}
-            contentContainerStyle={styles.adminRequestsDateFilterRow}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.adminRequestsDateFilterScroller}>
+          <View style={[styles.adminRequestsDateFilterScroller, styles.adminRequestsDateFilterRow]}>
             {dateFilterOptions.map((filter) => {
               const isActive = activeDateFilter === filter;
 
               return (
                 <Pressable
                   accessibilityRole="button"
+                  accessibilityState={{ selected: isActive }}
                   key={filter}
                   onPress={() => setActiveDateFilter(filter)}
                   style={({ pressed }) => [
@@ -172,19 +145,20 @@ export default function PhotographerRequestsScreen() {
                 </Pressable>
               );
             })}
-          </ScrollView>
+          </View>
 
-          <ScrollView
-            bounces={false}
-            contentContainerStyle={[styles.adminRequestsList, { paddingBottom: bottomPadding }]}
-            showsVerticalScrollIndicator={false}
-            style={styles.adminRequestsListScroller}>
-            {filteredRequests.length === 0 && (
-              <Text style={styles.adminRequestsEmptyText}>No booking requests found.</Text>
-            )}
-            {filteredRequests.map((request, index) => (
+          </View>}
+            ListEmptyComponent={<Text style={styles.adminRequestsEmptyText}>{isLoading
+              ? 'Loading booking requests...' : error ? '' : 'No booking requests found.'}</Text>}
+            ListFooterComponent={hasMore ? <Pressable accessibilityRole="button"
+              disabled={isLoadingMore || isRefreshing} onPress={() => { void loadMore(); }}
+              style={{ padding: 18, alignItems: 'center' }}>
+              <Text style={styles.adminRequestsEmptyText}>{isLoadingMore ? 'Loading more…' : 'Load more'}</Text>
+            </Pressable> : null}
+            renderItem={({ item: request, index }) => (
               <Pressable
                 accessibilityRole="button"
+                accessibilityLabel={`View booking for ${request.clientName}`}
                 key={request.id}
                 onPress={() => router.push(`/photographer/requests/${request.id}` as never)}
                 style={({ pressed }) => [styles.adminRequestListCard, pressed && { opacity: 0.86 }]}>
@@ -194,19 +168,19 @@ export default function PhotographerRequestsScreen() {
                   style={styles.adminRequestListImage}
                 />
                 <View style={styles.adminRequestListCopy}>
-                  <Text numberOfLines={1} style={styles.adminRequestListName}>{request.clientName}</Text>
-                  <Text numberOfLines={1} style={styles.adminRequestListPackage}>{request.packageName}</Text>
-                  <Text numberOfLines={1} style={styles.adminRequestListDate}>{formatRequestMeta(request)}</Text>
-                </View>
+                  <Text style={styles.adminRequestListName}>{request.clientName}</Text>
+                  <Text style={styles.adminRequestListPackage}>{request.packageName}</Text>
                 <View style={[styles.adminRequestStatusPill, getStatusPillStyle(request.status)]}>
                   <Text style={[styles.adminRequestStatusText, getStatusTextStyle(request.status)]}>
                     {formatFilterLabel(request.status)}
                   </Text>
                 </View>
+                  <Text style={styles.adminRequestListDate}>{formatRequestMeta(request)}</Text>
+                </View>
                 <ChevronRight />
               </Pressable>
-            ))}
-          </ScrollView>
+            )}
+          />
         </View>
       </View>
     </View>
@@ -214,7 +188,7 @@ export default function PhotographerRequestsScreen() {
 }
 
 function formatRequestMeta(request: AdminBookingRequest) {
-  return formatShortBookingDate(request.bookingDate);
+  return `${formatShortBookingDate(request.bookingDate)}\n${formatBookingTimeRange(request.startTime, request.endTime)}`;
 }
 
 function getStatusPillStyle(status: BookingStatus) {
@@ -269,53 +243,6 @@ function formatDateFilterLabel(filter: DateFilter) {
 function getNextDateFilter(currentFilter: DateFilter) {
   const currentIndex = dateFilterOptions.indexOf(currentFilter);
   return dateFilterOptions[(currentIndex + 1) % dateFilterOptions.length];
-}
-
-function isRequestInDateFilter(bookingDate: string, filter: DateFilter) {
-  if (filter === 'all') return true;
-
-  const today = getDateKey(new Date());
-
-  if (filter === 'today') {
-    return bookingDate === today;
-  }
-
-  if (filter === 'tomorrow') {
-    return bookingDate === getOffsetDateKey(1);
-  }
-
-  if (filter === 'upcoming') {
-    return bookingDate >= today;
-  }
-
-  const { endOfWeek, startOfWeek } = getCurrentWeekRange();
-  return bookingDate >= startOfWeek && bookingDate <= endOfWeek;
-}
-
-function getCurrentWeekRange() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
-  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
-
-  return {
-    endOfWeek: getDateKey(end),
-    startOfWeek: getDateKey(start),
-  };
-}
-
-function getOffsetDateKey(daysFromToday: number) {
-  const now = new Date();
-  const target = new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysFromToday);
-
-  return getDateKey(target);
-}
-
-function getDateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
 }
 
 function SearchIcon() {

@@ -1,8 +1,8 @@
+import { useBottomNavHeight } from '@/hooks/use-bottom-nav-height';
 import { StatusBar } from 'expo-status-bar';
 import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { bottomNavMetrics } from '@/styles/navigation.styles';
 import { photographerStyles as styles } from '@/styles/photographer.styles';
 
 type PhotographerPlaceholderScreenProps = {
@@ -18,8 +18,9 @@ export function PhotographerPlaceholderScreen({
   items,
   title,
 }: PhotographerPlaceholderScreenProps) {
+  const navHeight = useBottomNavHeight('admin');
   const insets = useSafeAreaInsets();
-  const bottomPadding = bottomNavMetrics.height + insets.bottom + 24;
+  const bottomPadding = navHeight + insets.bottom + 24;
 
   return (
     <View style={styles.container}>

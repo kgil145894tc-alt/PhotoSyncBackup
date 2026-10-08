@@ -2,6 +2,7 @@
 
 type PushTokenRow = {
   expo_push_token: string;
+  session_id: string;
 };
 
 type NotificationRow = {
@@ -22,6 +23,11 @@ Deno.serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  console.log('send-push-notification request received', {
+    method: req.method,
+    userAgent: req.headers.get('user-agent'),
+  });
+
   if (req.method !== 'POST') {
     return json({ error: 'Method not allowed' }, 405);
   }
@@ -40,6 +46,11 @@ Deno.serve(async (req) => {
 
   const body = await req.json().catch(() => null);
   const notificationId = body?.notification_id ?? body?.record?.id;
+
+  console.log('send-push-notification payload parsed', {
+    hasNotificationId: typeof notificationId === 'string',
+    notificationId,
+  });
 
   if (typeof notificationId !== 'string') {
     return json({ error: 'notification_id is required.' }, 400);
@@ -60,13 +71,16 @@ Deno.serve(async (req) => {
   const notification = notifications[0];
 
   if (!notification) {
+    console.log('send-push-notification notification not found', { notificationId });
     return json({ error: 'Notification not found.' }, 404);
   }
 
   const tokensResponse = await fetch(
-    `${supabaseUrl}/rest/v1/push_tokens?user_id=eq.${encodeURIComponent(notification.user_id)}&select=expo_push_token`,
+    `${supabaseUrl}/rest/v1/rpc/get_active_push_tokens_for_user`,
     {
       headers: restHeaders(serviceRoleKey),
+      method: 'POST',
+      body: JSON.stringify({ p_user_id: notification.user_id }),
     },
   );
 
@@ -75,11 +89,20 @@ Deno.serve(async (req) => {
   }
 
   const tokenRows = (await tokensResponse.json()) as PushTokenRow[];
-  const messages = tokenRows.map(({ expo_push_token }) => ({
+
+  console.log('send-push-notification target loaded', {
+    notificationId: notification.id,
+    tokenCount: tokenRows.length,
+    userId: notification.user_id,
+  });
+
+  const messages = tokenRows.map(({ expo_push_token, session_id }) => ({
     body: notification.message,
     data: {
       bookingId: notification.booking_id,
       notificationId: notification.id,
+      userId: notification.user_id,
+      sessionId: session_id,
       url: getNotificationUrl(notification),
     },
     sound: 'default',
@@ -102,6 +125,13 @@ Deno.serve(async (req) => {
   });
 
   const expoResult = await expoResponse.json().catch(() => null);
+
+  console.log('send-push-notification expo response', {
+    ok: expoResponse.ok,
+    result: expoResult,
+    sent: messages.length,
+    status: expoResponse.status,
+  });
 
   if (!expoResponse.ok) {
     return json({ error: expoResult ?? 'Expo push request failed.' }, 502);
@@ -128,6 +158,7 @@ function restHeaders(serviceRoleKey: string) {
   return {
     Authorization: `Bearer ${serviceRoleKey}`,
     apikey: serviceRoleKey,
+    'Content-Type': 'application/json',
   };
 }
 

@@ -1,6 +1,9 @@
 import { supabase } from '@/lib/supabase';
 import { getStudioSettings } from '@/services/studio-settings';
-import { type PhotoSyncNotification } from '@/types/notifications';
+import { ensureBookingReminderNotifications } from '@/services/booking-reminders';
+import { type NotificationCursor, type NotificationFilter, type NotificationInbox, type PhotoSyncNotification } from '@/types/notifications';
+
+export { ensureBookingReminderNotifications } from '@/services/booking-reminders';
 
 type NotificationRow = {
   booking_id: string | null;
@@ -250,13 +253,13 @@ export async function getMyNotifications(limit = 10): Promise<PhotoSyncNotificat
     return [];
   }
 
-  await ensureBookingReminderNotifications();
-
   const { data: userData } = await supabase.auth.getUser();
 
   if (!userData.user) {
     return [];
   }
+
+  await ensureBookingReminderNotifications({ expectedAccountId: userData.user.id });
 
   const { data, error } = await supabase
     .from('notifications')
@@ -280,38 +283,97 @@ export async function getMyNotifications(limit = 10): Promise<PhotoSyncNotificat
   }));
 }
 
-export async function getMyUnreadNotificationCount() {
+export async function getMyUnreadNotificationCount({ throwOnError = false }: { throwOnError?: boolean } = {}) {
   if (!supabase) {
+    if (throwOnError) throw new Error('Notifications are not connected yet.');
     return 0;
   }
 
-  await ensureBookingReminderNotifications();
+  const { data: userData, error: authError } = await supabase.auth.getUser();
 
-  const { data: userData } = await supabase.auth.getUser();
+  if (throwOnError && (authError || !userData.user)) throw new Error('Please sign in again to see your notifications.');
 
   if (!userData.user) {
     return 0;
   }
 
-  const { count, error } = await supabase
-    .from('notifications')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userData.user.id)
-    .eq('is_read', false);
+  await ensureBookingReminderNotifications({ expectedAccountId: userData.user.id });
 
-  if (error) {
+  try {
+    return await getUnreadCountForUser(userData.user.id);
+  } catch (error) {
+    if (throwOnError) throw error;
     return 0;
   }
+}
+
+async function getUnreadCountForUser(userId: string) {
+  const { count, error } = await supabase!
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('is_read', false);
+
+  if (error) throw error;
 
   return count ?? 0;
 }
 
-export async function ensureBookingReminderNotifications() {
-  if (!supabase) {
-    return;
+// Fetch unread items on the server so older unread updates are not hidden by
+// the recent-items limit. The separate count covers the entire inbox.
+export async function getMyNotificationInbox(
+  filter: NotificationFilter,
+  limit: number,
+  readUnreadCount?: (load: () => Promise<number>) => Promise<number>,
+  cursor?: NotificationCursor | null,
+): Promise<NotificationInbox> {
+  if (!supabase) throw new Error('Notifications are not connected yet.');
+
+  const { data, error: authError } = await supabase.auth.getUser();
+  if (authError || !data.user) throw new Error('Please sign in again to see your notifications.');
+  const userId = data.user.id;
+
+  if (!cursor) await ensureBookingReminderNotifications({ expectedAccountId: userId });
+  const pageSize = Math.min(30, Math.max(1, Math.floor(limit)));
+  let query = supabase.from('notifications')
+    .select('id, user_id, booking_id, title, message, is_read, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(pageSize + 1);
+  if (filter === 'unread') query = query.eq('is_read', false);
+  if (cursor) {
+    if (!/^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/.test(cursor.createdAt)
+      || !Number.isFinite(Date.parse(cursor.createdAt))
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cursor.id)) {
+      throw new Error('Invalid notification page cursor.');
+    }
+    query = query.or(`created_at.lt."${cursor.createdAt}",and(created_at.eq."${cursor.createdAt}",id.lt.${cursor.id})`);
   }
 
-  await supabase.rpc('ensure_booking_reminder_notifications');
+  const [feed, unread] = await Promise.all([
+    query,
+    readUnreadCount ? readUnreadCount(() => getUnreadCountForUser(userId)) : getUnreadCountForUser(userId),
+  ]);
+  if (feed.error) throw feed.error;
+
+  const rows = ((feed.data ?? []) as NotificationRow[]).slice(0, pageSize);
+  const hasMore = (feed.data?.length ?? 0) > pageSize;
+  const lastRow = rows.at(-1);
+  return {
+    hasMore,
+    nextCursor: hasMore && lastRow ? { createdAt: lastRow.created_at, id: lastRow.id } : null,
+    unreadCount: unread,
+    items: rows.map((row) => ({
+      bookingId: row.booking_id,
+      createdAt: row.created_at,
+      id: row.id,
+      isRead: row.is_read,
+      message: row.message,
+      title: row.title,
+      userId: row.user_id,
+    })),
+  };
 }
 
 export async function markNotificationRead(id: string) {
@@ -357,20 +419,68 @@ export async function markAllNotificationsRead() {
     return { message: 'Supabase is not connected yet.', success: false };
   }
 
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData, error: authError } = await supabase.auth.getUser();
 
-  if (!userData.user) {
-    return { message: 'Please login first.', success: false };
+  if (authError || !userData.user) {
+    return { message: 'Please sign in again to update your notifications.', success: false };
   }
 
-  const { error } = await supabase
-    .from('notifications')
-    .update({ is_read: true })
-    .eq('user_id', userData.user.id)
-    .eq('is_read', false);
+  // This function scopes the write to auth.uid() and returns its affected-row
+  // count. A notification arriving afterward is a new unread item, not a failure.
+  const { data: updatedCount, error: rpcError } = await supabase.rpc('mark_all_my_notifications_read');
+  if (!rpcError) {
+    return typeof updatedCount === 'number' && updatedCount >= 0
+      ? { success: true }
+      : { message: 'The server could not confirm the notification update.', success: false };
+  }
+  if (rpcError.code !== 'PGRST202' && rpcError.code !== '42883') {
+    return { message: rpcError.message, success: false };
+  }
 
-  if (error) {
-    return { message: error.message, success: false };
+  // Compatibility with projects that have only the single-notification RPC.
+  // Snapshot every unread ID before writing, including those beyond the UI page.
+  const accountId = userData.user.id;
+  const ids: string[] = [];
+  const batchSize = 200;
+  let afterId: string | null = null;
+  while (true) {
+    let query = supabase.from('notifications').select('id')
+      .eq('user_id', accountId).eq('is_read', false)
+      .order('id', { ascending: true }).limit(batchSize);
+    if (afterId) query = query.gt('id', afterId);
+    const { data, error } = await query;
+    if (error) return { message: error.message, success: false };
+    const page = (data ?? []) as { id: string }[];
+    ids.push(...page.map((row) => row.id));
+    if (page.length < batchSize) break;
+    afterId = page[page.length - 1].id;
+  }
+
+  for (let offset = 0; offset < ids.length; offset += batchSize) {
+    const { data: current, error: sessionError } = await supabase.auth.getUser();
+    if (sessionError || current.user?.id !== accountId) {
+      return { message: 'Your account changed. Please try again.', success: false };
+    }
+    const batch = ids.slice(offset, offset + batchSize);
+    const { data, error } = await supabase.from('notifications')
+      .update({ is_read: true }).eq('user_id', accountId).in('id', batch).select('id');
+    if (error && error.code !== '42501') return { message: error.message, success: false };
+    const savedIds = new Set(((data ?? []) as { id: string }[]).map((row) => row.id));
+    const unsaved = batch.filter((id) => !savedIds.has(id));
+
+    // RLS may silently skip the direct update. Use the same account-scoped
+    // function as tapping an individual notification, with bounded concurrency.
+    for (let start = 0; start < unsaved.length; start += 5) {
+      const results = await Promise.all(unsaved.slice(start, start + 5).map((id) =>
+        supabase!.rpc('mark_my_notification_read', { p_notification_id: id })));
+      const failed = results.find((result) => result.error || result.data !== true);
+      if (failed) {
+        return {
+          message: failed.error?.message ?? 'The server could not save all notification updates. Please try again.',
+          success: false,
+        };
+      }
+    }
   }
 
   return { success: true };

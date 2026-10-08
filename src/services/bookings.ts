@@ -1,27 +1,17 @@
 import { supabase } from '@/lib/supabase';
 import { getActiveBookingSlotsForDate } from '@/services/booking-availability';
 import { emitBookingsChanged } from '@/services/booking-events';
+import { emitCatalogChanged } from '@/services/catalog-events';
 import { createBookingStatusHistory } from '@/services/booking-status-history';
-import { getBookingDraft } from '@/services/booking-draft';
+import { getBookingDraft, setSelectedPackage } from '@/services/booking-draft';
 import { createAdminBookingSubmittedNotifications } from '@/services/notifications';
 import { getDefaultWorkingHoursWindow } from '@/services/studio-settings';
+import { getBookablePackage } from '@/services/service-catalog';
 
 type SubmitBookingResult = {
   message?: string;
   success: boolean;
 };
-
-type ServiceBookingRulesResult =
-  | {
-      bufferMinutes: number;
-      durationMinutes: number;
-      minimumNoticeDays: number;
-      success: true;
-    }
-  | {
-      message?: string;
-      success: false;
-    };
 
 export async function submitBookingRequest(): Promise<SubmitBookingResult> {
   if (!supabase) {
@@ -55,11 +45,30 @@ export async function submitBookingRequest(): Promise<SubmitBookingResult> {
     return { message: 'Please log in again before submitting your booking request.', success: false };
   }
 
-  const serviceRules = await getServiceBookingRules(selectedPackage.serviceId);
-
-  if (!serviceRules.success) {
-    return serviceRules;
+  // Browsing may use a cached price/rules snapshot; confirmation always reads
+  // this package and its parent service directly from the server.
+  let confirmedPackage;
+  try {
+    confirmedPackage = await getBookablePackage(selectedPackage.id, selectedPackage.serviceId);
+  } catch {
+    return { success: false, message: 'We could not verify the selected package. Please check your connection and try again.' };
   }
+  if (!confirmedPackage) {
+    emitCatalogChanged();
+    return { success: false, message: 'This package or service is no longer available. Please choose another package.' };
+  }
+  if (confirmedPackage.priceAmount !== selectedPackage.priceAmount || confirmedPackage.name !== selectedPackage.name
+    || confirmedPackage.durationMinutes !== selectedPackage.durationMinutes
+    || confirmedPackage.bufferMinutes !== selectedPackage.bufferMinutes
+    || confirmedPackage.minimumNoticeDays !== selectedPackage.minimumNoticeDays) emitCatalogChanged();
+  setSelectedPackage(confirmedPackage);
+  if (confirmedPackage.priceAmount !== selectedPackage.priceAmount) return { success: false,
+    message: `The package price changed to ${confirmedPackage.price}. Please review the updated price and confirm again.` };
+  const serviceRules = {
+    bufferMinutes: confirmedPackage.bufferMinutes ?? 0,
+    durationMinutes: confirmedPackage.durationMinutes ?? 0,
+    minimumNoticeDays: confirmedPackage.minimumNoticeDays ?? 1,
+  };
 
   if (serviceRules.durationMinutes > 0 && getTimeRangeMinutes(schedule.startTime, schedule.endTime) < serviceRules.durationMinutes) {
     return {
@@ -147,7 +156,7 @@ export async function submitBookingRequest(): Promise<SubmitBookingResult> {
         bookingDate: schedule.bookingDate,
         endTime: schedule.endTime,
         packageId: selectedPackage.id,
-        packageName: selectedPackage.name,
+        packageName: confirmedPackage.name,
         serviceId: selectedPackage.serviceId,
         startTime: schedule.startTime,
       },
@@ -157,7 +166,7 @@ export async function submitBookingRequest(): Promise<SubmitBookingResult> {
     await createAdminBookingSubmittedNotifications({
       bookingId: booking.id,
       clientName: information.fullName.trim(),
-      packageName: selectedPackage.name,
+      packageName: confirmedPackage.name,
     });
 
     emitBookingsChanged();
@@ -269,9 +278,11 @@ async function checkSlotAvailability({
     endTime: slot.end_time as string,
     startTime: slot.start_time as string,
   }));
-  const availabilityWindowsToCheck = customAvailabilityWindows.length
-    ? customAvailabilityWindows
-    : [await getDefaultWorkingHoursWindow()];
+  let availabilityWindowsToCheck = customAvailabilityWindows;
+  if (!availabilityWindowsToCheck.length) {
+    try { availabilityWindowsToCheck = [await getDefaultWorkingHoursWindow({ force: true, throwOnError: true })]; }
+    catch { return { message: 'Studio working hours could not be verified. Please try again.', success: false }; }
+  }
   const fitsAvailabilityWindow = availabilityWindowsToCheck.some((window) => {
     const windowStart = getTimeMinutes(window.startTime);
     const windowEnd = getTimeMinutes(window.endTime);
@@ -315,29 +326,6 @@ async function checkSlotAvailability({
   }
 
   return { success: true };
-}
-
-async function getServiceBookingRules(serviceId: string): Promise<ServiceBookingRulesResult> {
-  if (!supabase) {
-    return { message: 'Supabase is not connected yet.', success: false };
-  }
-
-  const { data, error } = await supabase
-    .from('services')
-    .select('duration_minutes, buffer_minutes, minimum_notice_days')
-    .eq('id', serviceId)
-    .maybeSingle();
-
-  if (error) {
-    return { message: `We could not verify the selected service duration: ${error.message}`, success: false };
-  }
-
-  return {
-    bufferMinutes: Number(data?.buffer_minutes ?? 0),
-    durationMinutes: Number(data?.duration_minutes ?? 0),
-    minimumNoticeDays: Number(data?.minimum_notice_days ?? 1),
-    success: true,
-  };
 }
 
 function isDateAllowedByMinimumNotice(bookingDate: string, minimumNoticeDays: number) {

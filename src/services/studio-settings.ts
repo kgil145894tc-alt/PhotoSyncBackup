@@ -1,4 +1,7 @@
 import { supabase } from '@/lib/supabase';
+import { emitCalendarChanged, subscribeToCalendarChanged } from '@/services/calendar-events';
+import { createAuthSessionScope } from '@/services/auth-session-scope';
+import { createSessionReadCache, type SessionReadOptions } from '@/services/session-read-cache';
 
 export type StudioSettings = {
   businessHours: string;
@@ -33,6 +36,7 @@ const fallbackStudioSettings: StudioSettings = {
 };
 
 type StudioSettingsRow = {
+  id: boolean;
   business_hours: string | null;
   contact_email: string | null;
   contact_phone: string | null;
@@ -41,37 +45,54 @@ type StudioSettingsRow = {
   studio_name: string | null;
 };
 
-export async function getStudioSettings(): Promise<StudioSettings> {
-  if (!supabase) {
-    return fallbackStudioSettings;
-  }
+const SETTINGS_COLUMNS = 'id, studio_name, studio_address, contact_phone, contact_email, default_shoot_location, business_hours';
 
+export type StudioSettingsSaveResult =
+  | { success: true; settings: StudioSettings }
+  | { success: false; message: string };
+
+const settingsReads = createSessionReadCache(async () => {
+  if (!supabase) throw new Error('Studio settings are not connected yet.');
   const { data, error } = await supabase
     .from('studio_settings')
-    .select('studio_name, studio_address, contact_phone, contact_email, default_shoot_location, business_hours')
+    .select(SETTINGS_COLUMNS)
     .eq('id', true)
     .maybeSingle();
 
-  if (error || !data) {
+  if (error) throw error;
+  return data ? mapStudioSettingsRow(data as StudioSettingsRow) : fallbackStudioSettings;
+}, { freshnessMs: 60_000, requireAccount: false });
+const ensureSettingsScope = supabase ? createAuthSessionScope(supabase.auth, settingsReads.setAccount) : async () => {};
+// Date-specific slot changes do not change the studio's singleton settings.
+subscribeToCalendarChanged((date) => { if (!date) settingsReads.invalidate(); });
+
+export async function getStudioSettings(options: SessionReadOptions & { throwOnError?: boolean } = {}): Promise<StudioSettings> {
+  try {
+    if (!supabase) throw new Error('Studio settings are not connected yet.');
+    await ensureSettingsScope();
+    return await settingsReads.read(options);
+  } catch (error) {
+    if (options.throwOnError) throw error;
+    // Keep existing display fallbacks, but never cache a failed/default read.
     return fallbackStudioSettings;
   }
-
-  return mapStudioSettingsRow(data as StudioSettingsRow);
 }
 
-export async function getDefaultWorkingHoursWindow(): Promise<WorkingHoursWindow> {
-  const settings = await getStudioSettings();
+export async function getDefaultWorkingHoursWindow(options: SessionReadOptions & { throwOnError?: boolean } = {}): Promise<WorkingHoursWindow> {
+  const settings = await getStudioSettings(options);
 
   return getWorkingHoursWindowFromBusinessHours(settings.businessHours);
 }
 
-export async function saveStudioSettings(values: StudioSettings) {
+export async function saveStudioSettings(values: StudioSettings): Promise<StudioSettingsSaveResult> {
   if (!supabase) {
     return { message: 'Supabase is not connected yet.', success: false };
   }
 
+  await ensureSettingsScope();
+  const isSessionCurrent = settingsReads.captureSession();
   const businessHours = formatBusinessHours(values.workingStartTime, values.workingEndTime);
-  const { error } = await supabase.from('studio_settings').upsert({
+  const { data, error } = await supabase.from('studio_settings').upsert({
     business_hours: businessHours,
     contact_email: values.contactEmail.trim() || null,
     contact_phone: values.contactPhone.trim() || null,
@@ -79,13 +100,24 @@ export async function saveStudioSettings(values: StudioSettings) {
     id: true,
     studio_address: values.studioAddress.trim() || null,
     studio_name: values.studioName.trim() || 'PhotoSync Studio',
-  });
+  }).select(SETTINGS_COLUMNS).single();
 
   if (error) {
     return { message: error.message, success: false };
   }
 
-  return { success: true };
+  if (!data || data.id !== true) {
+    return { message: 'Studio settings were not saved. Please try again.', success: false };
+  }
+
+  const settings = mapStudioSettingsRow(data as StudioSettingsRow);
+  if (!isSessionCurrent()) {
+    return { message: 'Your session changed. Please sign in again.', success: false };
+  }
+  // Publish invalidation first; the confirmed row then supersedes any older read.
+  emitCalendarChanged();
+  settingsReads.accept(settings);
+  return { success: true, settings };
 }
 
 function mapStudioSettingsRow(row: StudioSettingsRow): StudioSettings {
@@ -155,8 +187,11 @@ export function parseWorkingTimeInput(value: string) {
 }
 
 function getWorkingHoursWindowFromBusinessHours(value: string): WorkingHoursWindow {
-  const [startText, endText] = value.split('-').map((part) => part.trim());
-  const startTime = parseWorkingTimeInput(startText?.split(',').pop() ?? '');
+  // The weekday prefix ("Mon-Sat,") contains its own hyphen. Only split the
+  // time window, otherwise every saved value silently falls back to defaults.
+  const timeWindow = value.slice(value.lastIndexOf(',') + 1);
+  const [startText, endText] = timeWindow.split('-').map((part) => part.trim());
+  const startTime = parseWorkingTimeInput(startText ?? '');
   const endTime = parseWorkingTimeInput(endText ?? '');
 
   if (!startTime || !endTime || startTime >= endTime) {

@@ -3,6 +3,7 @@ import { normalizeUsername, validateUsername } from '@/services/profile';
 import { AuthRedirectRoute, UserRole } from '@/types/auth';
 
 const AUTH_TIMEOUT_MS = 12000;
+const PUSH_CLEANUP_TIMEOUT_MS = 2500;
 
 type AuthResult = {
   message?: string;
@@ -60,11 +61,16 @@ export async function signUpClientAccount({
   password: string;
   username: string;
 }): Promise<AuthResult> {
+  const normalizedEmail = email.trim().toLowerCase();
   const normalizedUsername = normalizeUsername(username);
   const usernameError = validateUsername(normalizedUsername);
 
-  if (!fullName.trim() || !email.trim() || !password || !normalizedUsername) {
+  if (!fullName.trim() || !normalizedEmail || !password || !normalizedUsername) {
     return { message: 'Please complete all required fields.' };
+  }
+
+  if (!/^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(normalizedEmail)) {
+    return { message: 'Please enter a valid email address, like name@example.com.' };
   }
 
   if (usernameError) {
@@ -91,8 +97,6 @@ export async function signUpClientAccount({
   } catch (error) {
     return { message: error instanceof Error ? error.message : 'Username setup could not be checked.' };
   }
-
-  const normalizedEmail = email.trim().toLowerCase();
 
   const { data, error } = await withTimeout(
     supabase.auth.signUp({
@@ -163,7 +167,22 @@ async function getEmailForUsername(username: string) {
 
 export async function signOutPhotoSync() {
   if (supabase) {
-    await supabase.auth.signOut();
+    const controller = new AbortController();
+    try {
+      await withTimeout((async () => {
+        const { removeCurrentPushNotificationToken } = await import('@/services/push-notifications');
+        if (!controller.signal.aborted) {
+          await removeCurrentPushNotificationToken({ signal: controller.signal });
+        }
+      })(), 'Notification cleanup timed out.', PUSH_CLEANUP_TIMEOUT_MS);
+    } catch {
+      console.warn('Notification cleanup did not finish. Continuing sign-out; server session cleanup will remove its registration.');
+    } finally {
+      // Abort unfinished cleanup so it cannot reach a later account's session.
+      controller.abort();
+    }
+    const { error } = await supabase.auth.signOut();
+    if (error) throw new Error(error.message);
   }
 }
 
@@ -305,9 +324,9 @@ async function getUserRole(userId: string): Promise<UserRole> {
   return data?.role === 'admin' ? 'admin' : 'client';
 }
 
-function withTimeout<T>(promise: PromiseLike<T>, message: string): Promise<T> {
+function withTimeout<T>(promise: PromiseLike<T>, message: string, timeoutMs = AUTH_TIMEOUT_MS): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => reject(new Error(message)), AUTH_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
 
     promise.then(
       (value) => {
