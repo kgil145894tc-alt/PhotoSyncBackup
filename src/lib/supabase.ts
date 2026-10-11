@@ -23,7 +23,9 @@ export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl as string, supabaseAnonKey as string, {
       auth: {
         autoRefreshToken: true,
-        detectSessionInUrl: false,
+        // Only consume browser OAuth callbacks on Login. Password recovery
+        // keeps its explicit session handling on the reset-password route.
+        detectSessionInUrl: typeof window !== 'undefined' && window.location?.pathname === '/login',
         persistSession: true,
         storage: authStorage,
       },

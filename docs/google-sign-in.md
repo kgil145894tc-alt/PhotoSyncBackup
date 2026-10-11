@@ -1,4 +1,18 @@
-# Android Google sign-in
+# Google sign-in
+
+## Web
+
+Login and registration show the Google button in the browser. The web service uses Supabase OAuth to redirect to Google's account chooser and returns to `/login` on the current origin. Supabase restores the returned session on that route, and the existing root auth listener loads the user's role and controls navigation. Password recovery continues to handle its session explicitly.
+
+Configure these settings before testing:
+
+1. In Supabase Authentication → URL Configuration → Redirect URLs, add `http://localhost:8081/login` (use the port printed by Expo) and `https://YOUR-PRODUCTION-DOMAIN/login`. Add each other development origin you use explicitly.
+2. In Google Cloud, open the Web OAuth client below. Add the web origins under Authorized JavaScript origins, including `http://localhost:8081` and the production origin. Keep the Supabase callback URL below under Authorized redirect URIs.
+3. Enable the Supabase Google provider with the Web client ID and secret as described below. Keep the secret in Supabase only.
+
+Run `npm run web`. Verify Google login, cancellation, first signup after accepting the terms, and logout followed by choosing another account. Verify existing photographer accounts retain their role. These checks require real Google/Supabase credentials; lint, typecheck, and web export do not validate provider settings.
+
+## Android
 
 Android login and registration use the native Google account chooser and exchange the ID token with Supabase. Each attempt uses a fresh nonce: Google receives SHA-256 and Supabase receives the original nonce. New users receive the existing database trigger's client role; existing roles remain unchanged. Root auth routing owns navigation, including login after logout.
 

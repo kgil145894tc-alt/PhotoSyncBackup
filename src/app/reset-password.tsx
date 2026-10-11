@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import * as Linking from 'expo-linking';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import {
@@ -10,20 +10,31 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AuthBrand } from '@/components/auth-brand';
+import { AuthTextField } from '@/components/auth-text-field';
+import { authRouteStyles as styles } from '@/styles/auth-route.styles';
 import { showAppAlert } from '@/components/app-alert';
-import { createPasswordRecoverySession, updatePasswordFromRecovery } from '@/services/auth';
+import { useAuthRoutingState } from '@/hooks/use-auth-routing';
+import { createPasswordRecoverySession, endPasswordRecoverySession, updatePasswordFromRecovery } from '@/services/auth';
 
 export default function ResetPasswordScreen() {
+  const insets = useSafeAreaInsets();
   const linkingUrl = Linking.useLinkingURL();
+  const { source } = useLocalSearchParams<{ source?: string }>();
+  const requestedFromApp = source === 'app';
+  const auth = useAuthRoutingState();
+  const [returnToLogin, setReturnToLogin] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(true);
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isReady, setIsReady] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState('Checking your reset link...');
   const [password, setPassword] = useState('');
+  const [isComplete, setIsComplete] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -50,210 +61,119 @@ export default function ResetPasswordScreen() {
       setIsReady(true);
     }
 
-    prepareRecoverySession();
+    void prepareRecoverySession().catch((error: unknown) => {
+      if (isMounted) setMessage(error instanceof Error ? error.message : 'Could not verify your reset link. Please try again.');
+    }).finally(() => {
+      if (isMounted) setIsPreparing(false);
+    });
 
     return () => {
       isMounted = false;
     };
   }, [linkingUrl]);
 
-  async function handleUpdatePassword() {
-    if (isSaving) {
-      return;
-    }
+  useEffect(() => {
+    // Wait for the signed-out render so Stack.Protected allows Login again.
+    if (returnToLogin && !auth.isLoading && auth.role === null) router.replace('/login');
+  }, [returnToLogin, auth.isLoading, auth.role]);
 
+  async function handleBackToLogin() {
+    if (isPreparing || isSaving || returnToLogin) return;
+    setIsSaving(true);
+    try {
+      await endPasswordRecoverySession();
+      setReturnToLogin(true);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not return to login. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleUpdatePassword() {
+    if (isSaving) return;
     if (password !== confirmPassword) {
       showAppAlert('Passwords do not match', 'Please confirm your new password.');
       return;
     }
-
     setIsSaving(true);
-    const result = await updatePasswordFromRecovery(password);
-    setIsSaving(false);
-
-    if (result.message) {
-      showAppAlert('PhotoSync', result.message);
-    }
-
-    if (result.route) {
-      router.replace(result.route as never);
+    try {
+      const result = await updatePasswordFromRecovery(password);
+      if (result.route) {
+        setIsReady(false);
+        setIsComplete(true);
+        setPassword('');
+        setConfirmPassword('');
+        setMessage('Password updated successfully. You can now log in with your new password.');
+        await endPasswordRecoverySession();
+      } else if (result.message) {
+        setMessage(result.message);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not finish resetting your password. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
   }
 
   return (
-    <View style={resetStyles.container}>
+    <View style={styles.container}>
       <StatusBar style="light" />
-      <Image
-        contentFit="cover"
-        source={require('@/assets/images/splash-background.png')}
-        style={StyleSheet.absoluteFill}
-      />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={resetStyles.keyboard}>
-        <ScrollView
-          contentContainerStyle={resetStyles.scrollContent}
+      <Image contentFit="cover" source={require('@/assets/images/splash-background.png')}
+        accessible={false} style={StyleSheet.absoluteFill} />
+      <View pointerEvents="none" style={styles.scrim} />
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        enabled={Platform.OS !== 'web'} style={styles.keyboardAvoidingView}>
+        <ScrollView contentContainerStyle={styles.scrollContent}
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}>
-          <View style={resetStyles.card}>
-            <Image
-              contentFit="contain"
-              source={require('@/assets/images/photosync-logo.png')}
-              style={resetStyles.logo}
-            />
-            <Text style={resetStyles.brand}>Photo<Text style={resetStyles.brandAccent}>Sync</Text></Text>
-            <Text style={resetStyles.title}>Reset Password</Text>
-            <Text style={resetStyles.message}>{message}</Text>
-
-            <TextInput
-              autoCapitalize="none"
-              editable={isReady && !isSaving}
-              onChangeText={setPassword}
-              placeholder="New password"
-              placeholderTextColor="#8AA3C3"
-              secureTextEntry
-              style={[resetStyles.input, !isReady && resetStyles.inputDisabled]}
-              textContentType="newPassword"
-              value={password}
-            />
-            <TextInput
-              autoCapitalize="none"
-              editable={isReady && !isSaving}
-              onChangeText={setConfirmPassword}
-              placeholder="Confirm new password"
-              placeholderTextColor="#8AA3C3"
-              secureTextEntry
-              style={[resetStyles.input, !isReady && resetStyles.inputDisabled]}
-              textContentType="newPassword"
-              value={confirmPassword}
-            />
-
-            <Pressable
-              accessibilityLabel="Update password"
-              accessibilityRole="button"
-              disabled={!isReady || isSaving}
-              onPress={handleUpdatePassword}
-              style={({ pressed }) => [
-                resetStyles.primaryButton,
-                (!isReady || pressed || isSaving) && { opacity: 0.78 },
-              ]}>
-              <Text style={resetStyles.primaryButtonText}>{isSaving ? 'Saving...' : 'Update Password'}</Text>
+          keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <View style={styles.header}>
+            <View style={[styles.headerContent, {
+              paddingTop: insets.top + 28,
+              paddingLeft: Math.max(24, insets.left + 16),
+              paddingRight: Math.max(24, insets.right + 16),
+            }]}>
+              <AuthBrand />
+            </View>
+          </View>
+          <View style={[styles.body, {
+            paddingBottom: insets.bottom + 20,
+            paddingLeft: Math.max(20, insets.left + 12),
+            paddingRight: Math.max(20, insets.right + 12),
+          }]}>
+            <View style={styles.panel}>
+              <Text accessibilityRole="header" style={styles.formTitle}>{isComplete ? 'Password Updated' : 'Set New Password'}</Text>
+              <Text accessibilityLiveRegion="polite" style={styles.authMessageText}>{message}</Text>
+              {isComplete && requestedFromApp && (
+                <Text style={styles.footerText}>Return to PhotoSync and log in with your new password. You can close this page.</Text>
+              )}
+              {!isComplete && <>
+              <AuthTextField label="New Password" creating disabled={!isReady || isSaving || returnToLogin}
+                value={password} onChangeText={setPassword} />
+              <AuthTextField label="Confirm Password" creating disabled={!isReady || isSaving || returnToLogin}
+                value={confirmPassword} onChangeText={setConfirmPassword} />
+              <Pressable accessibilityLabel="Update password" accessibilityRole="button"
+                accessibilityState={{ busy: isSaving, disabled: !isReady || isSaving || returnToLogin }}
+                disabled={!isReady || isSaving || returnToLogin} onPress={handleUpdatePassword}
+                style={({ pressed }) => [styles.actionButton,
+                  (!isReady || isSaving || returnToLogin || pressed) && styles.disabled]}>
+                <Text style={styles.actionButtonText}>{isSaving ? 'Please wait...' : 'Update Password'}</Text>
+              </Pressable>
+              </>}
+            </View>
+            {!(isComplete && requestedFromApp) && (
+            <Pressable accessibilityLabel="Back to login" accessibilityRole="button"
+              accessibilityState={{ disabled: isPreparing || isSaving || returnToLogin }}
+              disabled={isPreparing || isSaving || returnToLogin} onPress={handleBackToLogin}
+              style={({ pressed }) => [styles.footerButton,
+                (isPreparing || isSaving || returnToLogin || pressed) && styles.disabled]}>
+              <Text style={styles.footerText}><Text style={styles.linkText}>Back to Login</Text></Text>
             </Pressable>
-
-            <Pressable
-              accessibilityLabel="Back to login"
-              accessibilityRole="button"
-              onPress={() => router.replace('/login')}
-              style={({ pressed }) => [resetStyles.secondaryButton, pressed && { opacity: 0.72 }]}>
-              <Text style={resetStyles.secondaryButtonText}>Back to Login</Text>
-            </Pressable>
+            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
 }
-
-const resetStyles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#021526',
-  },
-  keyboard: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    padding: 24,
-  },
-  card: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderColor: '#FFFFFF',
-    borderRadius: 20,
-    borderWidth: 1,
-    paddingHorizontal: 24,
-    paddingVertical: 28,
-  },
-  logo: {
-    alignSelf: 'center',
-    height: 104,
-    width: 124,
-  },
-  brand: {
-    alignSelf: 'center',
-    color: '#FFFFFF',
-    fontFamily: 'Jomhuria',
-    fontSize: 62,
-    includeFontPadding: false,
-    lineHeight: 48,
-    marginTop: 6,
-  },
-  brandAccent: {
-    color: '#70A2E3',
-  },
-  title: {
-    color: '#FFFFFF',
-    fontFamily: 'Jomolhari',
-    fontSize: 28,
-    includeFontPadding: false,
-    lineHeight: 38,
-    marginTop: 18,
-    textAlign: 'center',
-  },
-  message: {
-    color: '#FFFFFF',
-    fontFamily: 'Inter',
-    fontSize: 14,
-    includeFontPadding: false,
-    lineHeight: 20,
-    marginTop: 10,
-    minHeight: 40,
-    textAlign: 'center',
-  },
-  input: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#FFFFFF',
-    borderRadius: 10,
-    borderWidth: 1,
-    color: '#142C4C',
-    fontFamily: 'Inter',
-    fontSize: 17,
-    height: 48,
-    marginTop: 16,
-    paddingHorizontal: 14,
-  },
-  inputDisabled: {
-    opacity: 0.72,
-  },
-  primaryButton: {
-    alignItems: 'center',
-    borderColor: '#FFFFFF',
-    borderRadius: 10,
-    borderWidth: 1,
-    height: 50,
-    justifyContent: 'center',
-    marginTop: 22,
-  },
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontFamily: 'Inter',
-    fontSize: 20,
-    fontWeight: '500',
-    includeFontPadding: false,
-    lineHeight: 28,
-  },
-  secondaryButton: {
-    alignItems: 'center',
-    height: 42,
-    justifyContent: 'center',
-    marginTop: 8,
-  },
-  secondaryButtonText: {
-    color: '#FFFFFF',
-    fontFamily: 'Inter',
-    fontSize: 15,
-    includeFontPadding: false,
-    lineHeight: 21,
-    textDecorationLine: 'underline',
-  },
-});

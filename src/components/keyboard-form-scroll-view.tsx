@@ -38,6 +38,7 @@ export function KeyboardFormScrollView({ onFocus, onLayout, onScroll, ...props }
   }, []);
 
   useEffect(() => {
+    if (Platform.OS === 'web') return;
     const show = Keyboard.addListener('keyboardDidShow', revealFocusedInput);
     return () => {
       show.remove();
@@ -53,8 +54,12 @@ export function KeyboardFormScrollView({ onFocus, onLayout, onScroll, ...props }
       keyboardShouldPersistTaps="handled"
       scrollEventThrottle={16}
       onFocus={(event) => {
-        focusedInput.current = TextInput.State.currentlyFocusedInput();
-        revealFocusedInput();
+        // Browser focus bubbles through the ScrollView too, but web has no
+        // currentlyFocusedInput API and handles revealing fields itself.
+        if (Platform.OS !== 'web') {
+          focusedInput.current = TextInput.State.currentlyFocusedInput();
+          revealFocusedInput();
+        }
         onFocus?.(event);
       }}
       onLayout={(event) => {

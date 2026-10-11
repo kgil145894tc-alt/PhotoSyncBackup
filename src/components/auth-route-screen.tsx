@@ -1,8 +1,7 @@
 import { Image } from 'expo-image';
-import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -27,9 +26,6 @@ import {
 } from '@/services/auth';
 import { authRouteStyles as styles } from '@/styles/auth-route.styles';
 import { authColors } from '@/styles/auth-theme';
-const PASSWORD_RESET_REDIRECT_URL = Linking.createURL('reset-password', {
-  scheme: 'photosync',
-});
 type AuthRouteVariant = 'create' | 'login';
 type AuthRouteScreenProps = { variant: AuthRouteVariant };
 const screenConfig = {
@@ -52,7 +48,14 @@ export function AuthRouteScreen({ variant }: AuthRouteScreenProps) {
   const mounted = useMountedRef();
   const submissionPending = useRef(false);
   const insets = useSafeAreaInsets();
-  const [authMessage, setAuthMessage] = useState('');
+  const [authMessage, setAuthMessage] = useState(() => {
+    if (Platform.OS !== 'web' || variant !== 'login' || typeof window === 'undefined') return '';
+    const params = new URLSearchParams(window.location.search);
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    return params.has('error') || hash.has('error')
+      ? 'Google sign-in was cancelled or could not finish. Please try again.'
+      : '';
+  });
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [isForgotPasswordVisible, setIsForgotPasswordVisible] = useState(false);
   const [isPrivacyAccepted, setIsPrivacyAccepted] = useState(false);
@@ -60,6 +63,15 @@ export function AuthRouteScreen({ variant }: AuthRouteScreenProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const config = screenConfig[variant];
+  useEffect(() => {
+    if (Platform.OS !== 'web' || variant !== 'login' || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    if (params.has('error') || hash.has('error')) {
+      // Remove the failed OAuth response so a refresh does not repeat it.
+      window.history.replaceState(window.history.state, '', window.location.pathname);
+    }
+  }, [variant]);
   const showAuthMessage = (message: string) => {
     setAuthMessage(message);
   };
@@ -92,10 +104,7 @@ export function AuthRouteScreen({ variant }: AuthRouteScreenProps) {
     setIsResetEmailSending(true);
 
     try {
-      const result = await sendPasswordResetEmail(
-        resetEmail,
-        PASSWORD_RESET_REDIRECT_URL,
-      );
+      const result = await sendPasswordResetEmail(resetEmail, Platform.OS === 'web' ? 'web' : 'app');
 
       if (!mounted.current) return;
 
@@ -273,7 +282,7 @@ export function AuthRouteScreen({ variant }: AuthRouteScreenProps) {
                 {isSubmitting ? 'Please wait...' : config.actionLabel}
               </Text>
             </Pressable>
-            {Platform.OS === 'android' && (
+            {(Platform.OS === 'android' || Platform.OS === 'web') && (
               <Pressable accessibilityRole="button" accessibilityLabel="Sign in with Google"
                 accessibilityState={{ busy: isSubmitting, disabled: isSubmitting }}
                 disabled={isSubmitting} onPress={handleGoogleSignIn}

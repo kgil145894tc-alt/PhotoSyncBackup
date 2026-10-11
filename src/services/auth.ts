@@ -4,6 +4,8 @@ import { AuthRedirectRoute, UserRole } from '@/types/auth';
 
 const AUTH_TIMEOUT_MS = 12000;
 const PUSH_CLEANUP_TIMEOUT_MS = 2500;
+// Email links must also work on devices without the native app installed.
+const PASSWORD_RESET_REDIRECT_URL = 'https://kirl123-photosync.expo.app/reset-password';
 
 type AuthResult = {
   message?: string;
@@ -212,7 +214,7 @@ export async function getSignedInUserRole(): Promise<UserRole | null> {
   return getUserRole(data.user.id);
 }
 
-export async function sendPasswordResetEmail(email: string, redirectTo: string): Promise<AuthResult> {
+export async function sendPasswordResetEmail(email: string, source: 'web' | 'app' = 'web'): Promise<AuthResult> {
   const normalizedEmail = email.trim();
 
   if (!normalizedEmail) {
@@ -226,7 +228,9 @@ export async function sendPasswordResetEmail(email: string, redirectTo: string):
   }
 
   const { error } = await withTimeout(
-    supabase.auth.resetPasswordForEmail(normalizedEmail, { redirectTo }),
+    supabase.auth.resetPasswordForEmail(normalizedEmail, {
+      redirectTo: `${PASSWORD_RESET_REDIRECT_URL}?source=${source}`,
+    }),
     'Sending the reset email is taking too long. Please check your internet connection.',
   );
 
@@ -286,6 +290,15 @@ export async function createPasswordRecoverySession(url: string): Promise<AuthRe
   }
 
   return { message: 'This password reset link is missing its verification code.' };
+}
+
+export async function endPasswordRecoverySession(): Promise<void> {
+  if (!supabase) return;
+  const { error } = await withTimeout(
+    supabase.auth.signOut({ scope: 'local' }),
+    'Returning to login is taking too long. Please try again.',
+  );
+  if (error) throw new Error(error.message);
 }
 
 export async function updatePasswordFromRecovery(password: string): Promise<AuthResult> {
